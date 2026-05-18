@@ -103,7 +103,9 @@
             animation: dots 1.2s steps(4, end) infinite;
             content: "";
             display: inline-block;
-            width: 24px;
+            width: 30px;
+            font-weight: bolder;
+            margin-top: 4px;
         }
 
         @keyframes dots {
@@ -163,6 +165,36 @@
             justify-content: space-between;
             margin-bottom: 12px;
         }
+
+        .messages {
+            min-height: 260px;
+            max-height: 420px;
+            overflow: auto;
+            border: 1px solid #d9e2ec;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fbfcfd;
+            position: relative;
+        }
+
+        .busy {
+            align-items: center;
+            background: rgba(11, 114, 133, 0.08);
+            border-radius: 8px;
+            color: #52606d;
+            display: flex;
+            gap: 8px;
+            padding: 5px 10px;
+            position: absolute;
+            left: 12px;
+            bottom: 12px;
+            width: fit-content;
+            z-index: 2;
+        }
+
+        #chatSection {
+            position: relative;
+        }
     </style>
 </head>
 <body>
@@ -185,12 +217,13 @@
                 <button id="logoutButton" class="secondary compact">Logout</button>
             </div>
             <p id="userInfo" class="meta"></p>
-            <div id="messages" class="messages"></div>
+            <div id="messages" class="messages">
+                <div id="busyIndicator" class="busy hidden"><span class="dots"></span></div>
+            </div>
             <label for="message">Message</label>
-            <textarea id="message" placeholder="Apply sick leave tomorrow for full day because I am not feeling well"></textarea>
-            <button id="sendButton">Send</button>
+            <textarea id="message" placeholder=""></textarea>
+            <button id="sendButton" disabled>Send</button>
             <button id="resetButton" class="secondary">Reset Chat</button>
-            <div id="busyIndicator" class="busy hidden">Waiting for HRMS AI<span class="dots"></span></div>
         </section>
     </main>
 
@@ -208,6 +241,8 @@
         const resetButton = document.getElementById("resetButton");
         const logoutButton = document.getElementById("logoutButton");
         const busyIndicator = document.getElementById("busyIndicator");
+        const defaultPlaceholder = messageInput.placeholder;
+        let busyTimer = null;
 
         let sessionId = localStorage.getItem("hrmsSessionId");
 
@@ -225,14 +260,21 @@
             userInfo.textContent = user
                 ? `${user.userName || user.email || "Logged in"} | ${user.empId || ""} | ${user.userRole || ""}`
                 : "Logged in";
+            messageInput.placeholder = user
+                ? `Hi ${user.userName || user.email || "there"}, how can I help you today?`
+                : defaultPlaceholder;
+            updateSendButtonState();
+            busyIndicator.style.display = "none";
         }
 
         function showLogin() {
             chatSection.classList.add("hidden");
             loginSection.classList.remove("hidden");
-            messages.innerHTML = "";
+            Array.from(messages.querySelectorAll(".message")).forEach((node) => node.remove());
             userInfo.textContent = "";
             loginStatus.textContent = "";
+            messageInput.placeholder = defaultPlaceholder;
+            busyIndicator.style.display = "none";
         }
 
         function clearLocalSession(message) {
@@ -314,12 +356,28 @@
             loginButton.disabled = isBusy;
         }
 
+        function updateSendButtonState() {
+            sendButton.disabled = !messageInput.value.trim();
+        }
+
         function setBusy(isBusy) {
-            sendButton.disabled = isBusy;
+            sendButton.disabled = isBusy || !messageInput.value.trim();
             resetButton.disabled = isBusy;
             logoutButton.disabled = isBusy;
             messageInput.disabled = isBusy;
-            busyIndicator.classList.toggle("hidden", !isBusy);
+
+            if (busyTimer) {
+                clearTimeout(busyTimer);
+                busyTimer = null;
+            }
+
+            if (isBusy) {
+                busyTimer = setTimeout(() => {
+                    busyIndicator.style.display = "flex";
+                }, 100);
+            } else {
+                busyIndicator.style.display = "none";
+            }
         }
 
         async function logout() {
@@ -369,6 +427,7 @@
         }
 
         loginButton.addEventListener("click", login);
+        messageInput.addEventListener("input", updateSendButtonState);
         sendButton.addEventListener("click", () => {
             const text = messageInput.value.trim();
 

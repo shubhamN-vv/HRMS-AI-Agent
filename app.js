@@ -12,6 +12,8 @@ const {
     resetHrmsChat
 } = require("./workflows/hrmsWorkflow");
 
+const GENERIC_LOGIN_FAILED_MESSAGE = "Username or password is incorrect.";
+
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -19,20 +21,14 @@ app.use(express.static(path.join(__dirname, "public")));
 function getSessionId(req) {
     return (
         req.headers["x-session-id"] ||
-        req.body.sessionId ||
-        req.body.userId ||
+        req.body?.sessionId ||
+        req.query?.sessionId ||
         ""
     ).toString();
 }
 
-function getOrCreateSession(sessionId) {
-    if (!sessions[sessionId]) {
-        sessions[sessionId] = {
-            history: []
-        };
-    }
-
-    return sessions[sessionId];
+function getSession(sessionId) {
+    return sessions[sessionId] || null;
 }
 
 function isSessionActive(session) {
@@ -47,6 +43,35 @@ function clearExpiredSession(sessionId, session) {
     }
 
     return false;
+}
+
+function requireSession(req, res, next) {
+    const sessionId = getSessionId(req);
+    const session = getSession(sessionId);
+
+    if (!sessionId || !session) {
+        return res.status(401).json({
+            error: "No active session. Please login first."
+        });
+    }
+
+    if (clearExpiredSession(sessionId, session)) {
+        return res.status(401).json({
+            error: "Session expired. Please login again."
+        });
+    }
+
+    if (!isSessionActive(session)) {
+        delete sessions[sessionId];
+        return res.status(401).json({
+            error: "Session expired. Please login again."
+        });
+    }
+
+    req.sessionId = sessionId;
+    req.session = session;
+
+    next();
 }
 
 app.post("/login", async (req, res) => {
@@ -73,37 +98,28 @@ app.post("/login", async (req, res) => {
             user: auth.user
         });
     } catch (error) {
+        const errorMessage = error.statusCode === 401
+            ? GENERIC_LOGIN_FAILED_MESSAGE
+            : error.response?.data?.message || error.message;
+
         return res.status(error.statusCode || 401).json({
-            error: error.response?.data?.message || error.message
+            error: errorMessage
         });
     }
 });
 
-app.get("/me", (req, res) => {
-    const sessionId = getSessionId(req);
-    const session = sessions[sessionId];
+app.get("/me", requireSession, (req, res) => {
+    const { sessionId, session } = req;
 
-    if (clearExpiredSession(sessionId, session)) {
-        return res.status(401).json({
-            error: "Session expired. Please login again."
-        });
-    }
-
-    if (isSessionActive(session) && session.user) {
-        return res.json({
-            sessionId,
-            user: session.user
-        });
-    }
-
-    return res.status(401).json({
-        error: "No active session. Please login first."
+    return res.json({
+        sessionId,
+        user: session.user
     });
 });
 
 app.get("/session", (req, res) => {
     const sessionId = getSessionId(req);
-    const session = sessions[sessionId];
+    const session = getSession(sessionId);
 
     return res.json({
         hasSessionId: Boolean(sessionId),
@@ -126,9 +142,10 @@ app.post("/logout", (req, res) => {
     });
 });
 
-app.post("/chat", async (req, res) => {
+app.post("/chat", requireSession, async (req, res) => {
     try {
-        const sessionId = getSessionId(req);
+        const sessionId = req.sessionId;
+        const session = req.session;
         const userMessage = String(req.body.message || "").trim();
 
         if (!userMessage) {
@@ -137,28 +154,7 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        if (!sessionId) {
-            return res.status(401).json({
-                error: "Please login first."
-            });
-        }
-
-        const session = getOrCreateSession(sessionId);
-
         console.log(`[CHAT] SessionId: ${sessionId}, hasToken: ${Boolean(session?.token)}, isExpired: ${session?.token ? isJwtExpired(session.token) : 'N/A'}, user: ${session?.user?.email}`);
-
-        if (clearExpiredSession(sessionId, session)) {
-            return res.status(401).json({
-                error: "Session expired. Please login again."
-            });
-        }
-
-        if (!isSessionActive(session)) {
-            console.log(`[CHAT] Session not active - token: ${Boolean(session?.token)}, expired: ${session?.token ? isJwtExpired(session.token) : 'N/A'}`);
-            return res.status(401).json({
-                error: "Please login first."
-            });
-        }
 
         if (["reset", "/reset", "start over"].includes(userMessage.toLowerCase())) {
             resetHrmsChat({ sessions, sessionId });

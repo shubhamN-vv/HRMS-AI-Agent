@@ -54,8 +54,10 @@ function findMessage(data) {
     );
 }
 
+const GENERIC_LOGIN_FAILED_MESSAGE = "Username or password is incorrect.";
+
 function createLoginError(message, statusCode = 401) {
-    const error = new Error(message || "Invalid email or password.");
+    const error = new Error(message || GENERIC_LOGIN_FAILED_MESSAGE);
     error.statusCode = statusCode;
 
     return error;
@@ -76,17 +78,17 @@ async function login({ email, password }) {
     const responseMessage = findMessage(response.data);
 
     if (response.status >= 400) {
-        throw createLoginError(responseMessage, response.status);
+        throw createLoginError(responseMessage || GENERIC_LOGIN_FAILED_MESSAGE, response.status);
     }
 
     if (response.data?.status === false || response.data?.success === false) {
-        throw createLoginError(responseMessage);
+        throw createLoginError(responseMessage || GENERIC_LOGIN_FAILED_MESSAGE);
     }
 
     const token = findToken(response.data);
 
     if (!token) {
-        throw createLoginError(responseMessage || "Invalid email or password.");
+        throw createLoginError(responseMessage || GENERIC_LOGIN_FAILED_MESSAGE);
     }
 
     return {
