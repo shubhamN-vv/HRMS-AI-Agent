@@ -4,6 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
     <style>
         :root {
             color-scheme: light;
@@ -47,7 +48,6 @@
             margin: 12px 0 6px;
         }
 
-        input,
         textarea,
         button {
             box-sizing: border-box;
@@ -55,13 +55,9 @@
             border-radius: 6px;
         }
 
-        input,
         textarea {
             border: 1px solid #bcccdc;
             padding: 10px;
-        }
-
-        textarea {
             width: 100%;
             min-height: 88px;
             resize: none;
@@ -87,9 +83,24 @@
             width: auto;
         }
 
+        button.ms-login {
+            background: #0078d4;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        .ms-logo {
+            width: 20px;
+            height: 20px;
         }
 
         .busy {
@@ -125,6 +136,28 @@
             75%,
             100% {
                 content: "...";
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
             }
         }
 
@@ -236,25 +269,54 @@
         #chatSection {
             position: relative;
         }
+
+        .login-container {
+            max-width: 400px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .login-header {
+            margin-bottom: 24px;
+        }
+
+        .login-header h1 {
+            color: #0f172a;
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            color: #52606d;
+            font-size: 14px;
+        }
     </style>
 </head>
 
 <body>
     <main>
         <section id="loginSection">
-            <h2>Login</h2>
-            <label for="email">Email</label>
-            <input id="email" type="email" autocomplete="username" />
-            <label for="password">Password</label>
-            <input id="password" type="password" autocomplete="current-password" />
-            <button id="loginButton">Login</button>
-            <p id="loginStatus" class="meta"></p>
+            <div class="login-container">
+                <div class="login-header">
+                    <h1>HRMS AI Agent</h1>
+                    <p>Sign in with your Microsoft account</p>
+                </div>
+                <button id="microsoftLoginButton" class="ms-login">
+                    <svg class="ms-logo" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="1" y="1" width="9" height="9" fill="white" />
+                        <rect x="13" y="1" width="9" height="9" fill="white" />
+                        <rect x="1" y="13" width="9" height="9" fill="white" />
+                        <rect x="13" y="13" width="9" height="9" fill="white" />
+                    </svg>
+                    Continue with Microsoft
+                </button>
+                <p id="loginStatus" class="meta"></p>
+            </div>
         </section>
 
         <section id="chatSection" class="hidden">
             <div class="chatHeader">
                 <h2>Chat | HRMS AI Agent</h2>
-                <button id="logoutButton" class="secondary compact">Logout</button>
+                <button id="logoutButton" class="secondary compact" style="font-size: small;">Logout</button>
             </div>
             <p id="userInfo" class="meta"></p>
             <div id="messages" class="messages">
@@ -271,24 +333,84 @@
     </main>
 
     <script>
+        // MSAL Configuration
+        const msalConfig = {
+            auth: {
+                clientId: "f876110d-32fd-4f66-b5d7-1f7860f09445",
+                authority: "https://login.microsoftonline.com/814e9d1d-9941-4486-84f3-d0dd72dca76b",
+                redirectUri: window.location.origin,
+                postLogoutRedirectUri: "/"
+            },
+            cache: {
+                cacheLocation: "sessionStorage",
+                storeAuthStateInCookie: false
+            }
+        };
+
+        const loginRequest = {
+            scopes: ["User.Read", "Mail.Read"]
+        };
+
+        // Initialize MSAL
+        const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+        // DOM Elements
         const loginSection = document.getElementById("loginSection");
         const chatSection = document.getElementById("chatSection");
         const loginStatus = document.getElementById("loginStatus");
         const userInfo = document.getElementById("userInfo");
         const messages = document.getElementById("messages");
         const messageInput = document.getElementById("message");
-        const emailInput = document.getElementById("email");
-        const passwordInput = document.getElementById("password");
-        const loginButton = document.getElementById("loginButton");
+        const microsoftLoginButton = document.getElementById("microsoftLoginButton");
         const logoutButton = document.getElementById("logoutButton");
         const busyIndicator = document.getElementById("busyIndicator");
         const slashMenu = document.getElementById("slashMenu");
         const defaultPlaceholder = messageInput.placeholder;
         const slashModules = ["leave", "wfh", "projects", "holidays", "payroll", "attendance", "benefits", "directory", "policies"];
+
         let busyTimer = null;
         let selectedSlashIndex = -1;
-
         let sessionId = localStorage.getItem("hrmsSessionId");
+
+        function extractNameFromEmail(email) {
+            if (!email) return "User";
+            
+            // Extract: firstname.lastname
+            const match = email.match(/vv_([^@]+)/);
+            if (!match) return email.split('@')[0];
+            
+            const parts = match[1].split('.');
+            const name = parts.map(part => 
+                part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+            ).join(' ');
+            
+            return name;
+        }
+
+        function showToast(message, type = "success") {
+            const toastDiv = document.createElement("div");
+            toastDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === "success" ? "#4caf50" : "#f44336"};
+                color: white;
+                padding: 16px 24px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 9999;
+                font-size: 14px;
+                animation: slideIn 0.3s ease-in-out;
+                max-width: 400px;
+            `;
+            toastDiv.textContent = message;
+            document.body.appendChild(toastDiv);
+
+            setTimeout(() => {
+                toastDiv.style.animation = "slideOut 0.3s ease-in-out";
+                setTimeout(() => toastDiv.remove(), 300);
+            }, 3000);
+        }
 
         function addMessage(text, type) {
             const node = document.createElement("div");
@@ -301,11 +423,16 @@
         function showChat(user) {
             loginSection.classList.add("hidden");
             chatSection.classList.remove("hidden");
-            userInfo.textContent = user
-                ? `${user.userName || user.email || "Logged in"} | ${user.empId || ""} | ${user.userRole || ""}`
-                : "Logged in";
+            
+            if (user) {
+                const userName = extractNameFromEmail(user);
+                userInfo.textContent = userName;
+            } else {
+                userInfo.textContent = user?.userName || user || "Logged in";
+            }
+            
             messageInput.placeholder = user
-                ? `Hi ${user.userName || user.email || "there"}, how can I help you today?`
+                ? `Hi ${extractNameFromEmail(user) || "there"}, how can I help you today?`
                 : defaultPlaceholder;
             closeSlashMenu();
             busyIndicator.style.display = "none";
@@ -330,36 +457,77 @@
             loginStatus.textContent = message || "Please login again.";
         }
 
-        async function login() {
-            loginStatus.textContent = "Logging in...";
+        async function handleMicrosoftLogin() {
+            loginStatus.textContent = "Signing in with Microsoft...";
             setLoginBusy(true);
 
             try {
-                const response = await fetch("/login", {
+                const activeAccount = msalInstance.getActiveAccount();
+                let authResult;
+
+                if (activeAccount) {
+                    try {
+                        authResult = await msalInstance.acquireTokenSilent({
+                            scopes: loginRequest.scopes,
+                            account: activeAccount,
+                        });
+                    } catch (err) {
+                        console.warn("Silent token acquisition failed:", err.message);
+                        authResult = await msalInstance.loginPopup(loginRequest);
+                    }
+                } else {
+                    authResult = await msalInstance.loginPopup(loginRequest);
+                }
+
+                if (!authResult || !authResult.accessToken) {
+                    loginStatus.textContent = "Failed to obtain access token";
+                    return;
+                }
+
+                await handleAuthenticationSuccess(authResult.accessToken);
+            } catch (error) {
+                loginStatus.textContent = error.message || "Microsoft login failed";
+                console.error("Login error:", error);
+            } finally {
+                setLoginBusy(false);
+            }
+        }
+
+        async function handleAuthenticationSuccess(msAccessToken) {
+            loginStatus.textContent = "Verifying with HRMS...";
+
+            try {
+                const response = await fetch("/login/sso", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
-                        email: emailInput.value,
-                        password: passwordInput.value,
+                        token: msAccessToken,
                     }),
                 });
 
                 const data = await response.json();
 
                 if (!response.ok) {
-                    loginStatus.textContent = data.error || "Login failed";
+                    loginStatus.textContent = data.error || "Authentication failed";
+                    showToast(data.error || "Authentication failed", "error");
                     return;
                 }
 
                 sessionId = data.sessionId;
                 localStorage.setItem("hrmsSessionId", sessionId);
                 showChat(data.user);
+                loginStatus.textContent = "";
+
+                // Show welcome message as toast
+                const message = data.message || "Welcome back!";
+                showToast(message, "success");
+                console.log('Login message:', message);
             } catch (error) {
-                loginStatus.textContent = "Unable to login. Please try again.";
-            } finally {
-                setLoginBusy(false);
+                loginStatus.textContent = "Unable to authenticate. Please try again.";
+                showToast("Unable to authenticate. Please try again.", "error");
+                console.error("Authentication error:", error)
             }
         }
 
@@ -397,9 +565,7 @@
         }
 
         function setLoginBusy(isBusy) {
-            emailInput.disabled = isBusy;
-            passwordInput.disabled = isBusy;
-            loginButton.disabled = isBusy;
+            microsoftLoginButton.disabled = isBusy;
         }
 
         function getSlashQuery() {
@@ -539,7 +705,8 @@
             });
         }
 
-        loginButton.addEventListener("click", login);
+        // Event Listeners
+        microsoftLoginButton.addEventListener("click", handleMicrosoftLogin);
         messageInput.addEventListener("input", handleMessageInput);
         messageInput.addEventListener("keydown", (event) => {
             if (slashMenu.classList.contains("hidden")) {
@@ -592,6 +759,7 @@
         });
         logoutButton.addEventListener("click", logout);
 
+        // Initialize
         restoreSession();
     </script>
 </body>

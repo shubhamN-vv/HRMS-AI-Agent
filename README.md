@@ -4,7 +4,7 @@ Node.js HRMS assistant that uses GitHub Models/OpenAI tool calling to automate H
 
 ## Features
 
-- HRMS login with email/password
+- HRMS login with Microsoft SSO
 - User-specific JWT session handling
 - Leave and WFH request preview + confirmation
 - Assigned project lookup

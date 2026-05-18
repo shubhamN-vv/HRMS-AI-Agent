@@ -5,14 +5,12 @@ const express = require("express");
 const path = require("path");
 
 const sessions = require("./session/sessionStore");
-const { login } = require("./services/authApi");
+const { verifyMsToken } = require("./services/ssoAuthApi");
 const { isJwtExpired } = require("./services/hrmsApi");
 const {
     handleHrmsChat,
     resetHrmsChat
 } = require("./workflows/hrmsWorkflow");
-
-const GENERIC_LOGIN_FAILED_MESSAGE = "Username or password is incorrect.";
 
 const app = express();
 app.use(express.json());
@@ -74,33 +72,35 @@ function requireSession(req, res, next) {
     next();
 }
 
-app.post("/login", async (req, res) => {
+app.post("/login/sso", async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { token: msAccessToken } = req.body;
 
-        if (!email || !password) {
+        if (!msAccessToken) {
             return res.status(400).json({
-                error: "email and password are required"
+                error: "Microsoft access token is required"
             });
         }
 
-        const auth = await login({ email, password });
+        const auth = await verifyMsToken(msAccessToken);
         const sessionId = crypto.randomUUID();
 
         sessions[sessionId] = {
             token: auth.token,
             user: auth.user,
+            permissions: auth.permissions,
+            loginDate: auth.loginDate,
             history: []
         };
 
         return res.json({
             sessionId,
-            user: auth.user
+            user: auth.user,
+            permissions: auth.permissions,
+            loginDate: auth.loginDate
         });
     } catch (error) {
-        const errorMessage = error.statusCode === 401
-            ? GENERIC_LOGIN_FAILED_MESSAGE
-            : error.response?.data?.message || error.message;
+        const errorMessage = error.message || "Microsoft SSO authentication failed";
 
         return res.status(error.statusCode || 401).json({
             error: errorMessage
