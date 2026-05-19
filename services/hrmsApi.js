@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const axios = require("axios");
 
-const DEFAULT_API_BASE_URL = "https://vv-vp-api.azurewebsites.net/api/v1/employee";
+const DEFAULT_API_BASE_URL = "https://vv-vp-api.azurewebsites.net/api/v1";
 
 function getApiBaseUrl() {
     return process.env.HRMS_API_BASE_URL || DEFAULT_API_BASE_URL;
@@ -171,7 +171,7 @@ function createRootApi(authContext = {}) {
 async function getAttendance({ year = new Date().getFullYear(), authContext } = {}) {
     const api = createEmployeeApi(authContext);
     console.log(`[HRMS] getAttendance: year=${year}, hasToken=${Boolean(getToken(authContext))}`);
-    const response = await api.get(`/attendance-record?year=${year}`);
+    const response = await api.get(`/employee/attendance-record?year=${year}`);
 
     return response.data;
 }
@@ -195,14 +195,14 @@ async function getLeaveTypes({ authContext } = {}) {
 
 async function getLeaveRequests({ skip = 0, limit = 10, authContext } = {}) {
     const api = createEmployeeApi(authContext);
-    const response = await api.get(`/leaveRequest?skip=${skip}&limit=${limit}`);
+    const response = await api.get(`/employee/leaveRequest?skip=${skip}&limit=${limit}`);
 
     return response.data;
 }
 
 async function getAllEmployeeLeaves({ authContext } = {}) {
     const api = createEmployeeApi(authContext);
-    const response = await api.get("/allEmployee-leave");
+    const response = await api.get("/employee/allEmployee-leave");
 
     return response.data;
 }
@@ -250,7 +250,7 @@ async function getLeaveTypeLeaveCount({ userId, authContext } = {}) {
         );
     }
 
-    const response = await api.get(`/leaveTypeLeaveCount/${id}`);
+    const response = await api.get(`/employee/leaveTypeLeaveCount/${id}`);
 
     return response.data;
 }
@@ -306,7 +306,7 @@ async function submitDailyStatusReport({ tasks = [], authContext } = {}) {
         tasks
     });
     
-    const response = await api.post("/employeeDsr", tasks);
+    const response = await api.post("/employee/employeeDsr", tasks);
 
     console.log(`[HRMS] submitDailyStatusReport response:`, {
         status: response.status,
@@ -338,7 +338,7 @@ async function markDownTime({ date, departmentId, description, endTime, name, po
         payload
     });
 
-    const response = await api.post("/markDownTime", payload);
+    const response = await api.post("/employee/markDownTime", payload);
 
     console.log(`[HRMS] markDownTime response:`, {
         status: response.status,
@@ -406,7 +406,7 @@ async function applyLeave({
 
     const payload = {
         empId: user.empId,
-        userId: user.userId, // Keep as string/original type
+        userId: user.userId,
         leaveDate: {
             fromDate,
             toDate
@@ -425,9 +425,9 @@ async function applyLeave({
     }
 
     const leavePaths = [
-        "/leaveRequest",
-        "/leave-request",
-        "/markLeave"
+        "/employee/leaveRequest",
+        "/employee/leave-request",
+        "/employee/markLeave"
     ];
 
     let lastAttempt = null;
