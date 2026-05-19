@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const axios = require("axios");
 
-const DEFAULT_API_BASE_URL = "https://vv-vp-api.azurewebsites.net/api/v1";
+const DEFAULT_API_BASE_URL = "https://vv-vp-api.azurewebsites.net/api/v1/employee";
 
 function getApiBaseUrl() {
     return process.env.HRMS_API_BASE_URL || DEFAULT_API_BASE_URL;
@@ -105,6 +105,45 @@ function createHeaders(authContext = {}) {
     return headers;
 }
 
+function createApiLogger(instance) {
+    instance.interceptors.request.use(config => {
+        console.log("[HRMS API REQUEST]", {
+            method: config.method?.toUpperCase(),
+            url: `${config.baseURL}${config.url}`,
+            headers: config.headers,
+            data: config.data
+        });
+        return config;
+    });
+
+    instance.interceptors.response.use(
+        response => {
+            console.log("[HRMS API RESPONSE]", {
+                method: response.config.method?.toUpperCase(),
+                url: `${response.config.baseURL}${response.config.url}`,
+                status: response.status,
+                data: response.data
+            });
+
+            if (response.status === 401) {
+                console.error(`[HRMS] 401 Response from ${response.config.url}`);
+                console.error(`[HRMS] Headers sent:`, response.config.headers);
+            }
+
+            return response;
+        },
+        error => {
+            console.error("[HRMS API ERROR]", {
+                method: error.config?.method?.toUpperCase(),
+                url: error.config?.baseURL + error.config?.url,
+                message: error.message,
+                response: error.response?.data
+            });
+            return Promise.reject(error);
+        }
+    );
+}
+
 function createEmployeeApi(authContext = {}) {
     const instance = axios.create({
         baseURL: getApiBaseUrl(),
@@ -112,13 +151,7 @@ function createEmployeeApi(authContext = {}) {
         validateStatus: () => true // Don't throw on any status
     });
 
-    instance.interceptors.response.use(response => {
-        if (response.status === 401) {
-            console.error(`[HRMS] 401 Response from ${response.config.url}`);
-            console.error(`[HRMS] Headers sent:`, response.config.headers);
-        }
-        return response;
-    });
+    createApiLogger(instance);
 
     return instance;
 }
@@ -130,13 +163,7 @@ function createRootApi(authContext = {}) {
         validateStatus: () => true // Don't throw on any status
     });
 
-    instance.interceptors.response.use(response => {
-        if (response.status === 401) {
-            console.error(`[HRMS] 401 Response from ${response.config.url}`);
-            console.error(`[HRMS] Headers sent:`, response.config.headers);
-        }
-        return response;
-    });
+    createApiLogger(instance);
 
     return instance;
 }
@@ -378,24 +405,67 @@ async function applyLeave({
     }
 
     const payload = {
-        contactNum: process.env.CONTACT_NUM || "9090909090",
-        dateTime1: now,
-        dateTime2: now,
         empId: user.empId,
-        leaveDate: [fromDate, toDate],
+        userId: user.userId, // Keep as string/original type
+        leaveDate: {
+            fromDate,
+            toDate
+        },
         leaveDuration,
         leaveReason,
-        leaveType,
-        poId: [Number(process.env.PO_ID || 245)],
-        userId: Number(user.userId)
+        leaveType
     };
 
-    const response = await api.post(
-        process.env.HRMS_MARK_LEAVE_PATH || "/markLeave",
-        payload
-    );
+    if (process.env.CONTACT_NUM) {
+        payload.contactNum = process.env.CONTACT_NUM;
+    }
 
-    return response.data;
+    if (process.env.PO_ID) {
+        payload.poId = [Number(process.env.PO_ID)];
+    }
+
+    const leavePaths = [
+        "/leaveRequest",
+        "/leave-request",
+        "/markLeave"
+    ];
+
+    let lastAttempt = null;
+
+    for (const path of leavePaths) {
+        try {
+            console.log(`[HRMS] applyLeave trying ${path} with base ${api.defaults.baseURL}`);
+            const response = await api.post(path, payload);
+
+            if (response.status >= 200 && response.status < 300) {
+                return response.data;
+            }
+
+            lastAttempt = { path, response };
+
+            if (
+                response.status === 404 ||
+                response.status === 405 ||
+                (typeof response.data === "string" && response.data.includes("Cannot POST"))
+            ) {
+                continue;
+            }
+
+            throw new Error(
+                `HRMS applyLeave failed for ${path}: status ${response.status}, response=${JSON.stringify(response.data)}`
+            );
+        } catch (error) {
+            lastAttempt = { path, error };
+        }
+    }
+
+    const responseDetails = lastAttempt?.response
+        ? `status ${lastAttempt.response.status}, body=${JSON.stringify(lastAttempt.response.data)}`
+        : lastAttempt?.error?.message || "no response";
+
+    throw new Error(
+        `Leave application failed after trying paths ${leavePaths.join(", ")}. ${responseDetails}`
+    );
 }
 
 module.exports = {
