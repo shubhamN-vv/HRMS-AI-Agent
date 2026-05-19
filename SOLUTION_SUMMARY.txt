@@ -1,0 +1,116 @@
+================================================================================
+                    HRMS LEAVE/WFH BUG FIX - SOLUTION SUMMARY
+================================================================================
+
+PROBLEM: Leave and WFH applications stopped working after commit 51aa730
+
+ROOT CAUSE ANALYSIS:
+================================================================================
+
+1. BASE URL ISSUE (Critical)
+   
+   ❌ Changed from: https://vv-vp-api.azurewebsites.net/api/v1/employee
+   ❌ Changed to:   https://vv-vp-api.azurewebsites.net/api/v1
+   
+   Impact: Broke separation between employee and global endpoints
+   - Employee endpoints called relative paths like /leaveRequest
+   - Global endpoints called full paths like /api/v1/holidays
+   - Changing base URL globally broke one type or the other
+
+2. PAYLOAD FORMAT ISSUE (Critical)
+   
+   ❌ leaveDate sent as array:
+      { leaveDate: ["2026-05-20", "2026-05-22"] }
+   
+   ✓ API expects object format:
+      { leaveDate: { fromDate: "2026-05-20", toDate: "2026-05-22" } }
+
+3. TYPE CONVERSION ISSUE (Medium)
+   
+   ❌ userId: Number(user.userId)
+   ✓ Should be: userId: user.userId (keep original type)
+
+================================================================================
+BETTER SOLUTION APPLIED:
+================================================================================
+
+Commit 46afe38: "Refactor: Keep base URL as /api/v1 and add /employee to paths"
+
+✓ Base URL: https://vv-vp-api.azurewebsites.net/api/v1 (unchanged globally)
+✓ Employee endpoints: Add /employee/ prefix to individual endpoint paths
+✓ Global endpoints: Remain unchanged with full /api/v1/... paths
+✓ Payload: Fixed leaveDate to object format
+✓ Type: Keep userId as original type
+
+ENDPOINT MAPPING:
+================================================================================
+
+UPDATED ENDPOINTS:
+
+Employee Endpoints (with /employee prefix):
+- POST   /employee/leaveRequest            -> Apply leave/WFH
+- GET    /employee/leaveRequest            -> Get leave requests
+- GET    /employee/leaveTypeLeaveCount/{id}-> Get leave balance
+- POST   /employee/employeeDsr             -> Submit daily status
+- POST   /employee/markDownTime            -> Record downtime
+- GET    /employee/allEmployee-leave       -> Get all leaves
+- GET    /employee/attendance-record       -> Get attendance
+
+Global Endpoints (unchanged):
+- GET    /api/v1/globalType/leave-type    -> Leave types
+- GET    /api/v1/holidays/...              -> Holidays
+- GET    /api/v1/punchLogs/...             -> Punch logs
+- GET    /api/v1/projectInfo/...           -> Projects
+- POST   /api/v1/ticket/create-ticket      -> Create tickets
+
+FINAL URLs (Complete):
+================================================================================
+
+Base URL: https://vv-vp-api.azurewebsites.net/api/v1
+
+Employee Endpoints:
+https://vv-vp-api.azurewebsites.net/api/v1/employee/leaveRequest
+https://vv-vp-api.azurewebsites.net/api/v1/employee/employeeDsr
+https://vv-vp-api.azurewebsites.net/api/v1/employee/markDownTime
+... and all others with /employee/ prefix
+
+Global Endpoints:
+https://vv-vp-api.azurewebsites.net/api/v1/globalType/leave-type
+https://vv-vp-api.azurewebsites.net/api/v1/holidays/...
+... and all others with /api/v1/ prefix
+
+FILES MODIFIED:
+================================================================================
+
+services/hrmsApi.js:
+  Line 5: Base URL remains /api/v1 (unchanged)
+  Line 174: getAttendance - /attendance-record -> /employee/attendance-record
+  Line 198: getLeaveRequests - /leaveRequest -> /employee/leaveRequest
+  Line 205: getAllEmployeeLeaves - /allEmployee-leave -> /employee/allEmployee-leave
+  Line 253: getLeaveTypeLeaveCount - /leaveTypeLeaveCount -> /employee/leaveTypeLeaveCount
+  Line 310: submitDailyStatusReport - /employeeDsr -> /employee/employeeDsr
+  Line 342: markDownTime - /markDownTime -> /employee/markDownTime
+  Lines 410-413: leaveDate format fixed (array -> object)
+  Line 409: userId type preserved (removed Number conversion)
+  Lines 428-430: applyLeave paths updated with /employee prefix
+
+COMMITS:
+================================================================================
+
+e19a5d6: Fix: Restore correct API base URL and fix leave payload structure
+46afe38: Refactor: Keep base URL as /api/v1 and add /employee to endpoint paths
+b99ca70: docs: Update FIXES_APPLIED.md with final solution details
+
+TESTING CHECKLIST:
+================================================================================
+
+✓ Syntax validation passed
+✓ All imports correct
+✓ No circular dependencies
+✓ Backward compatible
+✓ Employee endpoints use /employee/ prefix
+✓ Global endpoints unchanged
+✓ Leave payload format correct (object, not array)
+✓ userId type preserved
+
+READY FOR DEPLOYMENT ✓
