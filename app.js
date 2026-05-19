@@ -93,6 +93,16 @@ app.post("/login/sso", async (req, res) => {
             history: []
         };
 
+        console.log("[LOGIN SSO] session created", {
+            sessionId,
+            user: auth.user && {
+                userId: auth.user.userId,
+                empId: auth.user.empId,
+                email: auth.user.email,
+                userName: auth.user.userName
+            }
+        });
+
         return res.json({
             sessionId,
             user: auth.user,

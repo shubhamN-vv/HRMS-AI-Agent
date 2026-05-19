@@ -37,6 +37,95 @@ const openAiTools = [
             type: "integer"
         }
     }),
+    createToolSchema("get_current_year_holidays", "Get holidays for the current year from HRMS."),
+    createToolSchema("get_leave_type_leave_count", "Get leave count details for a specific employee user ID.", {
+        userId: {
+            type: "integer"
+        }
+    }, ["userId"]),
+    createToolSchema("get_active_tickets", "Get active tickets for a specific employee user ID.", {
+        userId: {
+            type: "integer"
+        }
+    }, ["userId"]),
+    createToolSchema("get_punch_logs", "Get detailed punch log entries from HRMS."),
+    createToolSchema("get_project_team_report", "Get project team member report for a specific employee user ID.", {
+        userId: {
+            type: "integer"
+        }
+    }, ["userId"]),
+    createToolSchema("submit_daily_status_report", "Submit an employee daily status report (DSR) with one or more work tasks. Requires project ID, task description, minutes spent, task status, and working date.", {
+        tasks: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    projectId: { type: "string", description: "Project identifier (e.g., VVPL002)" },
+                    taskDetails: { type: "string", description: "Task description or details" },
+                    taskMinutes: { type: "integer", description: "Minutes spent on the task" },
+                    taskStatus: { type: "string", description: "Task status (e.g., Inprogress, Completed, OnHold)" },
+                    workingDate: { type: "string", description: "Working date in YYYY-MM-DD format" }
+                },
+                required: ["projectId", "taskDetails", "taskMinutes", "taskStatus", "workingDate"],
+                additionalProperties: false
+            }
+        }
+    }, ["tasks"]),
+    createToolSchema("mark_down_time", "Record downtime or absence for an employee (e.g., system down, internet issue). Requires date, department, description, start/end times, subject, employee name, and project owner IDs. Call get_department_dropdown first.", {
+        date: {
+            type: "string",
+            description: "Downtime date in YYYY/MM/DD or YYYY-MM-DD format"
+        },
+        departmentId: {
+            type: "integer",
+            description: "Department identifier (get from get_department_dropdown)"
+        },
+        description: {
+            type: "string",
+            description: "Detailed downtime description"
+        },
+        endTime: {
+            type: "string",
+            description: "Downtime end time in ISO 8601 format (e.g., 2026-05-18T11:54:02.010Z)"
+        },
+        name: {
+            type: "string",
+            description: "Employee name"
+        },
+        poId: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Project owner IDs (e.g., [249])"
+        },
+        startTime: {
+            type: "string",
+            description: "Downtime start time in ISO 8601 format (e.g., 2026-05-18T10:54:02.010Z)"
+        },
+        subject: {
+            type: "string",
+            description: "Downtime subject/title"
+        }
+    }, ["date", "departmentId", "description", "endTime", "name", "poId", "startTime", "subject"]),
+    createToolSchema("create_support_ticket", "Create a support ticket for issues or requests. Requires title, description, priority level, and the user ID to assign it to.", {
+        assigned_to: {
+            type: "integer",
+            description: "User ID to assign the ticket to"
+        },
+        description: {
+            type: "string",
+            description: "Detailed ticket description"
+        },
+        priority: {
+            type: "string",
+            enum: ["low", "medium", "high"],
+            description: "Ticket priority level"
+        },
+        title: {
+            type: "string",
+            description: "Ticket title or issue summary"
+        }
+    }, ["assigned_to", "description", "priority", "title"]),
+    createToolSchema("get_department_dropdown", "Get the list of available departments for downtime submission (hr, it, training, sales & marketting, technology, qa)."),
     createToolSchema("apply_employee_leave", "Apply employee leave or WFH using HRMS. Only use this after the user explicitly confirms the preview.", {
         fromDate: {
             type: "string",

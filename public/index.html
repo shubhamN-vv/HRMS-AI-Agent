@@ -366,14 +366,24 @@
         const busyIndicator = document.getElementById("busyIndicator");
         const slashMenu = document.getElementById("slashMenu");
         const defaultPlaceholder = messageInput.placeholder;
-        const slashModules = ["leave", "wfh", "projects", "holidays", "payroll", "attendance", "benefits", "directory", "policies"];
+        const slashModules = [
+            "leave", 
+            "wfh", 
+            "projects", 
+            "holidays", 
+            "attendance", 
+            "punching-report", 
+            "daily-status-report",
+            "down-time",
+            "tickets"
+        ];
 
         let busyTimer = null;
         let selectedSlashIndex = -1;
         let sessionId = localStorage.getItem("hrmsSessionId");
 
         function extractNameFromEmail(email) {
-            if (!email) return "User";
+            if (!email || typeof email !== 'string') return "User";
             
             // Extract: firstname.lastname
             const match = email.match(/vv_([^@]+)/);
@@ -385,6 +395,37 @@
             ).join(' ');
             
             return name;
+        }
+
+        function getUserDisplay(user) {
+            if (!user) return "Logged in";
+            if (typeof user === 'string') return user;
+            const id = user.empId || user.userId || user.employeeId || user.employee_id || "";
+            const name = user.userName || user.name || user.email || "User";
+            const role = user.userRole || user.role || "";
+            return [name, id, role].filter(Boolean).join(" | ");
+        }
+
+        function getUserName(user) {
+            if (!user) return "there";
+            if (typeof user === 'string') return extractNameFromEmail(user);
+            return extractNameFromEmail(user.email || user.userName || user.name || "");
+        }
+
+        function showChat(user) {
+            loginSection.classList.add("hidden");
+            chatSection.classList.remove("hidden");
+            
+            const displayUser = getUserDisplay(user);
+            const userName = getUserName(user);
+
+            userInfo.textContent = displayUser;
+            
+            messageInput.placeholder = user
+                ? `Hi ${userName || "there"}, how can I help you today?`
+                : defaultPlaceholder;
+            closeSlashMenu();
+            busyIndicator.style.display = "none";
         }
 
         function showToast(message, type = "success") {
@@ -418,24 +459,6 @@
             node.textContent = text;
             messages.appendChild(node);
             messages.scrollTop = messages.scrollHeight;
-        }
-
-        function showChat(user) {
-            loginSection.classList.add("hidden");
-            chatSection.classList.remove("hidden");
-            
-            if (user) {
-                const userName = extractNameFromEmail(user);
-                userInfo.textContent = userName;
-            } else {
-                userInfo.textContent = user?.userName || user || "Logged in";
-            }
-            
-            messageInput.placeholder = user
-                ? `Hi ${extractNameFromEmail(user) || "there"}, how can I help you today?`
-                : defaultPlaceholder;
-            closeSlashMenu();
-            busyIndicator.style.display = "none";
         }
 
         function showLogin() {

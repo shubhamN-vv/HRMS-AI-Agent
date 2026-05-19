@@ -37,6 +37,86 @@ function findToken(data) {
     );
 }
 
+function decodeJwt(token) {
+    if (!token || typeof token !== "string" || !token.includes(".")) {
+        return {};
+    }
+
+    try {
+        const payload = token.split(".")[1];
+        const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+        const decoded = Buffer.from(normalized, "base64").toString("utf8");
+
+        return JSON.parse(decoded);
+    } catch (error) {
+        return {};
+    }
+}
+
+function normalizeSsoUser(user = {}) {
+    if (!user || typeof user !== "object") {
+        return {};
+    }
+
+    console.log("Normalizing SSO user data:", user);
+
+    return {
+        ...user,
+        userId:
+            user.userId ??
+            user.user_id ??
+            user.id ??
+            user.sub ??
+            user.employeeId ??
+            user.empId ??
+            user.emp_id ??
+            user.employee_id,
+        empId:
+            user.empId ??
+            user.emp_id ??
+            user.employeeId ??
+            user.employee_id ??
+            user.userId ??
+            user.id,
+        email:
+            user.email ??
+            user.upn ??
+            user.preferred_username ??
+            user.userPrincipalName ??
+            user.username,
+        name:
+            user.name ??
+            user.displayName ??
+            user.preferred_username ??
+            user.givenName ??
+            user.fullName
+    };
+}
+
+function hasUserIdentity(user = {}) {
+    return Boolean(
+        user &&
+        typeof user === "object" &&
+        (user.userId ?? user.empId ?? user.email ?? user.name ?? user.userName ?? user.employeeId ?? user.employee_id ?? user.emp_id)
+    );
+}
+
+function getSsoUser(token, rawUser = {}) {
+    const normalizedFromResponse = normalizeSsoUser(rawUser);
+
+    if (hasUserIdentity(normalizedFromResponse)) {
+        return normalizedFromResponse;
+    }
+
+    const normalizedFromToken = normalizeSsoUser(decodeJwt(token));
+
+    if (hasUserIdentity(normalizedFromToken)) {
+        return normalizedFromToken;
+    }
+
+    return normalizedFromResponse;
+}
+
 function findMessage(data) {
     if (!data || typeof data !== "object") {
         return null;
@@ -83,9 +163,17 @@ async function verifyMsToken(msAccessToken) {
             throw createSsoError(responseMessage || "No token received from server");
         }
 
+        const rawUser =
+            response.data.user ||
+            response.data.data?.user ||
+            response.data.result?.user ||
+            response.data.data ||
+            response.data.result ||
+            {};
+
         return {
             token,
-            user: response.data.user,
+            user: getSsoUser(token, rawUser),
             permissions: response.data.permissions,
             loginDate: response.data.loginDate,
             raw: response.data
