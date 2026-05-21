@@ -268,7 +268,6 @@
 
         .busy .dots {
             font-size: 24px;
-            font-weight: 800;
             line-height: 1;
         }
 
@@ -281,17 +280,18 @@
             position: absolute;
             bottom: 12px;
             right: 12px;
-            width: 38px;
-            height: 38px;
+            width: 32px;
+            height: 32px;
             border: none;
             border-radius: 50%;
             background: rgba(0, 0, 0, 0.08);
-            color: #000000;
+            color: #1e1e1e;
+            /* border: 0.1px solid #1e1e1e; */
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            font-size: 18px;
+            font-size: 14px;
             padding: 0;
             box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
             transition: background 0.2s ease, transform 0.2s ease;
@@ -337,7 +337,13 @@
 
 <body>
     <main>
-        <section id="loginSection">
+        <section id="loadingSection">
+            <div class="login-container">
+                <p id="loginStatus" class="meta">Loading...</p>
+            </div>
+        </section>
+
+        <section id="loginSection" class="hidden">
             <div class="login-container">
                 <div class="login-header">
                     <h1>HRMS AI Agent</h1>
@@ -352,7 +358,7 @@
                     </svg>
                     Continue with Microsoft
                 </button>
-                <p id="loginStatus" class="meta"></p>
+                <p class="meta"></p>
             </div>
         </section>
 
@@ -402,6 +408,7 @@
         const msalInstance = new msal.PublicClientApplication(msalConfig);
 
         // DOM Elements
+        const loadingSection = document.getElementById("loadingSection");
         const loginSection = document.getElementById("loginSection");
         const chatSection = document.getElementById("chatSection");
         const loginStatus = document.getElementById("loginStatus");
@@ -414,6 +421,16 @@
         const stopButton = document.getElementById("stopButton");
         const slashMenu = document.getElementById("slashMenu");
         const defaultPlaceholder = messageInput.placeholder;
+
+        // Hide the old login section and show only the loading screen.
+        if (loadingSection) {
+            loadingSection.classList.remove("hidden");
+        }
+        if (loginSection) {
+            loginSection.classList.add("hidden");
+        }
+        loginStatus.textContent = "Loading...";
+
         const slashModules = [
             "leave", 
             "wfh", 
@@ -464,6 +481,9 @@
         }
 
         function showChat(user) {
+            if (loadingSection) {
+                loadingSection.classList.add("hidden");
+            }
             loginSection.classList.add("hidden");
             chatSection.classList.remove("hidden");
             
@@ -489,8 +509,9 @@
             const toastDiv = document.createElement("div");
             toastDiv.style.cssText = `
                 position: fixed;
-                top: 20px;
-                right: 20px;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
                 background: ${type === "success" ? "#4caf50" : "#f44336"};
                 color: white;
                 padding: 16px 24px;
@@ -520,7 +541,6 @@
 
         function showLogin() {
             chatSection.classList.add("hidden");
-            loginSection.classList.remove("hidden");
             Array.from(messages.querySelectorAll(".message")).forEach((node) =>
                 node.remove(),
             );
@@ -539,8 +559,10 @@
             setBusy(false);
             stopButton.classList.add("hidden");
             stopButton.disabled = true;
-            showLogin();
             loginStatus.textContent = message || "Please login again.";
+
+            // Redirect to Microsoft SSO instead of showing the sign-in UI.
+            msalInstance.loginRedirect(loginRequest);
         }
 
         async function handleMicrosoftLogin() {
@@ -559,10 +581,12 @@
                         });
                     } catch (err) {
                         console.warn("Silent token acquisition failed:", err.message);
-                        authResult = await msalInstance.loginPopup(loginRequest);
+                        await msalInstance.loginRedirect(loginRequest);
+                        return;
                     }
                 } else {
-                    authResult = await msalInstance.loginPopup(loginRequest);
+                    await msalInstance.loginRedirect(loginRequest);
+                    return;
                 }
 
                 if (!authResult || !authResult.accessToken) {
@@ -813,7 +837,8 @@
                 });
             }
 
-            showLogin();
+            // Redirect the user immediately back to Microsoft SSO after logout.
+            await msalInstance.loginRedirect(loginRequest);
         }
 
         function restoreSession() {
@@ -837,6 +862,24 @@
                     showChat(data.user);
                 }
             });
+        }
+
+        async function initializeAuth() {
+            try {
+                const redirectResponse = await msalInstance.handleRedirectPromise();
+                if (redirectResponse?.accessToken) {
+                    await handleAuthenticationSuccess(redirectResponse.accessToken);
+                    return;
+                }
+            } catch (error) {
+                console.error("MSAL redirect handling error:", error);
+            }
+
+            restoreSession();
+
+            if (!sessionId) {
+                await handleMicrosoftLogin();
+            }
         }
 
         // Event Listeners
@@ -894,7 +937,7 @@
         logoutButton.addEventListener("click", logout);
 
         // Initialize
-        restoreSession();
+        initializeAuth();
     </script>
 </body>
 
