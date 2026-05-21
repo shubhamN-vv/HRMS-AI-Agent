@@ -2,18 +2,57 @@ require("dotenv").config();
 
 const axios = require("axios");
 
-const DEFAULT_API_BASE_URL = "https://vv-vp-api.azurewebsites.net/api/v1";
-
 function getApiBaseUrl() {
-    return process.env.HRMS_API_BASE_URL || DEFAULT_API_BASE_URL;
+    return (process.env.HRMS_API_BASE_URL || "").trim();
 }
 
-function getApiRoot() {
-    try {
-        return new URL(getApiBaseUrl()).origin;
-    } catch (error) {
-        return getApiBaseUrl();
+function normalizeBaseUrl(url) {
+    if (!url) {
+        return url;
     }
+
+    try {
+        const parsed = new URL(url);
+        parsed.pathname = parsed.pathname.replace(/\/employee\/?$/, "");
+        return parsed.toString().replace(/\/$/, "");
+    } catch (error) {
+        return url.replace(/\/employee\/?$/, "").replace(/\/$/, "");
+    }
+}
+
+function getApiRootUrl() {
+    const baseUrl = getApiBaseUrl();
+    return normalizeBaseUrl(baseUrl);
+}
+
+function getEmployeeBaseUrl() {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) {
+        return baseUrl;
+    }
+
+    try {
+        const parsed = new URL(baseUrl);
+        parsed.pathname = parsed.pathname.replace(/\/?$/, "");
+        return parsed.toString().replace(/\/$/, "");
+    } catch (error) {
+        return baseUrl.replace(/\/$/, "");
+    }
+}
+
+function normalizeApiPath(path, baseUrl) {
+    const normalizedPath = path?.startsWith("/") ? path : `/${path}`;
+
+    if (!baseUrl) {
+        return normalizedPath;
+    }
+
+    const cleanBase = baseUrl.replace(/\/$/, "");
+    if (cleanBase.endsWith("/employee") && normalizedPath.startsWith("/employee/")) {
+        return normalizedPath.replace(/^\/employee/, "");
+    }
+
+    return normalizedPath;
 }
 
 function decodeJwt(token) {
@@ -69,6 +108,54 @@ function normalizeUserClaims(user = {}) {
     };
 
     return normalized;
+}
+
+function toNumberArray(value) {
+    if (Array.isArray(value)) {
+        return value.map(Number).filter(n => !Number.isNaN(n));
+    }
+
+    if (typeof value === "number" && !Number.isNaN(value)) {
+        return [value];
+    }
+
+    if (typeof value === "string") {
+        return value
+            .split(/[\s,;|]+/)
+            .map(part => Number(part.trim()))
+            .filter(n => !Number.isNaN(n));
+    }
+
+    return [];
+}
+
+function getUserContactNumber(user = {}) {
+    const candidate =
+        user.contactNum ??
+        user.contactNumber ??
+        user.phone ??
+        user.mobile ??
+        user.phoneNumber ??
+        user.phone_number ??
+        user.mobileNumber;
+
+    if (candidate === undefined || candidate === null) {
+        return undefined;
+    }
+
+    return String(candidate).trim() || undefined;
+}
+
+function getUserPoIds(user = {}) {
+    const candidate =
+        user.poId ??
+        user.poIds ??
+        user.projectOwnerId ??
+        user.projectOwnerIds ??
+        user.po_id ??
+        user.project_owner_id;
+
+    return toNumberArray(candidate);
 }
 
 function isJwtExpired(token) {
@@ -144,10 +231,46 @@ function createApiLogger(instance) {
     );
 }
 
+function ensureSuccess(response, requestLabel = "HRMS API request") {
+    const isSuccessfulStatus = response.status >= 200 && response.status < 300;
+    const statusFlag = response.data?.status;
+    const successFlag = response.data?.success;
+
+    if (
+        isSuccessfulStatus &&
+        statusFlag !== false &&
+        successFlag !== false
+    ) {
+        return response.data;
+    }
+
+    const message =
+        response.data?.message ||
+        response.data?.error ||
+        response.data?.result?.message ||
+        response.data?.result?.error ||
+        response.statusText ||
+        "Unknown HRMS API error";
+
+    const error = new Error(`${requestLabel} failed: ${message}`);
+    error.statusCode = response.status;
+    error.response = response;
+    throw error;
+}
+
+async function request(api, method, path, body = undefined) {
+    const normalizedPath = normalizeApiPath(path, api.defaults.baseURL);
+    const response = await api[method](normalizedPath, body);
+    return ensureSuccess(response, `${method.toUpperCase()} ${normalizedPath}`);
+}
+
+const HRMS_API_TIMEOUT_MS = Number(process.env.HRMS_API_TIMEOUT_MS) || 10000;
+
 function createEmployeeApi(authContext = {}) {
     const instance = axios.create({
-        baseURL: getApiBaseUrl(),
+        baseURL: getEmployeeBaseUrl(),
         headers: createHeaders(authContext),
+        timeout: HRMS_API_TIMEOUT_MS,
         validateStatus: () => true // Don't throw on any status
     });
 
@@ -158,8 +281,9 @@ function createEmployeeApi(authContext = {}) {
 
 function createRootApi(authContext = {}) {
     const instance = axios.create({
-        baseURL: getApiRoot(),
+        baseURL: getApiRootUrl(),
         headers: createHeaders(authContext),
+        timeout: HRMS_API_TIMEOUT_MS,
         validateStatus: () => true // Don't throw on any status
     });
 
@@ -171,72 +295,49 @@ function createRootApi(authContext = {}) {
 async function getAttendance({ year = new Date().getFullYear(), authContext } = {}) {
     const api = createEmployeeApi(authContext);
     console.log(`[HRMS] getAttendance: year=${year}, hasToken=${Boolean(getToken(authContext))}`);
-    const response = await api.get(`/employee/attendance-record?year=${year}`);
-
-    return response.data;
+    return request(api, "get", `/employee/attendance-record?year=${year}`);
 }
 
 async function getLeaveTypes({ authContext } = {}) {
     const api = createRootApi(authContext);
 
     try {
-        const response = await api.get("/api/v1/globalType/leave-type");
-
-        if (response.status >= 200 && response.status < 300) {
-            return response.data;
-        }
+        return await request(api, "get", "/globalType/leave-type");
     } catch (error) {
         console.warn("[HRMS] primary leave type endpoint failed, falling back:", error?.message || error);
     }
 
-    const fallbackResponse = await api.get("/api/v1/globalType/masterglobaltype/leave_type");
-    return fallbackResponse.data;
+    return request(api, "get", "/globalType/masterglobaltype/leave_type");
 }
 
 async function getLeaveRequests({ skip = 0, limit = 10, authContext } = {}) {
     const api = createEmployeeApi(authContext);
-    const response = await api.get(`/employee/leaveRequest?skip=${skip}&limit=${limit}`);
-
-    return response.data;
+    return request(api, "get", `/employee/leaveRequest?skip=${skip}&limit=${limit}`);
 }
 
 async function getAllEmployeeLeaves({ authContext } = {}) {
     const api = createEmployeeApi(authContext);
-    const response = await api.get("/employee/allEmployee-leave");
-
-    return response.data;
+    return request(api, "get", "/employee/allEmployee-leave");
 }
 
 async function getHolidays({ skip = 0, limit = 10, authContext } = {}) {
     const api = createRootApi(authContext);
-    const response = await api.get(`/api/v1/holidays/getAllHolidays?skip=${skip}&limit=${limit}`);
-
-    return response.data;
+    return request(api, "get", `/holidays/getAllHolidays?skip=${skip}&limit=${limit}`);
 }
 
 async function getPunchReports({ monthCount = 1, authContext } = {}) {
     const api = createRootApi(authContext);
-    const response = await api.get(
-        `/api/v1/punchLogs/biometric/cal/punches?monthCount=${monthCount}`
-    );
-
-    return response.data;
+    return request(api, "get", `/punchLogs/biometric/cal/punches?monthCount=${monthCount}`);
 }
 
 async function getProjects({ skip = 0, limit = 10, status = 1, authContext } = {}) {
     const api = createRootApi(authContext);
-    const response = await api.get(
-        `/api/v1/projectInfo?skip=${skip}&limit=${limit}&status=${status}`
-    );
-
-    return response.data;
+    return request(api, "get", `/projectInfo?skip=${skip}&limit=${limit}&status=${status}`);
 }
 
 async function getCurrentYearHolidays({ authContext } = {}) {
     const api = createRootApi(authContext);
-    const response = await api.get("/api/v1/holidays/getAllCurrentYearHolidays");
-
-    return response.data;
+    return request(api, "get", "/holidays/getAllCurrentYearHolidays");
 }
 
 async function getLeaveTypeLeaveCount({ userId, authContext } = {}) {
@@ -250,9 +351,7 @@ async function getLeaveTypeLeaveCount({ userId, authContext } = {}) {
         );
     }
 
-    const response = await api.get(`/employee/leaveTypeLeaveCount/${id}`);
-
-    return response.data;
+    return request(api, "get", `/employee/leaveTypeLeaveCount/${id}`);
 }
 
 async function getActiveTickets({ userId, authContext } = {}) {
@@ -266,16 +365,12 @@ async function getActiveTickets({ userId, authContext } = {}) {
         );
     }
 
-    const response = await api.get(`/api/v1/ticket/active-ticket/${id}`);
-
-    return response.data;
+    return request(api, "get", `/ticket/active-ticket/${id}`);
 }
 
 async function getPunchLogs({ authContext } = {}) {
     const api = createRootApi(authContext);
-    const response = await api.get("/api/v1/punchLogs/biometric/punchlogs");
-
-    return response.data;
+    return request(api, "get", "/punchLogs/biometric/punchlogs");
 }
 
 async function getProjectTeamReport({ userId, authContext } = {}) {
@@ -289,9 +384,7 @@ async function getProjectTeamReport({ userId, authContext } = {}) {
         );
     }
 
-    const response = await api.get(`/api/v1/projectInfo/team/${id}`);
-
-    return response.data;
+    return request(api, "get", `/projectInfo/team/${id}`);
 }
 
 async function submitDailyStatusReport({ tasks = [], authContext } = {}) {
@@ -306,14 +399,13 @@ async function submitDailyStatusReport({ tasks = [], authContext } = {}) {
         tasks
     });
     
-    const response = await api.post("/employee/employeeDsr", tasks);
+    const result = await request(api, "post", "/employee/employeeDsr", tasks);
 
     console.log(`[HRMS] submitDailyStatusReport response:`, {
-        status: response.status,
-        data: response.data
+        result
     });
 
-    return response.data;
+    return result;
 }
 
 async function markDownTime({ date, departmentId, description, endTime, name, poId, startTime, subject, authContext } = {}) {
@@ -338,14 +430,7 @@ async function markDownTime({ date, departmentId, description, endTime, name, po
         payload
     });
 
-    const response = await api.post("/employee/markDownTime", payload);
-
-    console.log(`[HRMS] markDownTime response:`, {
-        status: response.status,
-        data: response.data
-    });
-
-    return response.data;
+    return request(api, "post", "/employee/markDownTime", payload);
 }
 
 async function createTicket({ assigned_to, description, priority, title, authContext } = {}) {
@@ -366,14 +451,7 @@ async function createTicket({ assigned_to, description, priority, title, authCon
         payload
     });
 
-    const response = await api.post("/api/v1/ticket/create-ticket", payload);
-
-    console.log(`[HRMS] createTicket response:`, {
-        status: response.status,
-        data: response.data
-    });
-
-    return response.data;
+    return request(api, "post", "/ticket/create-ticket", payload);
 }
 
 async function getLeaveContext({ authContext } = {}) {
@@ -404,68 +482,84 @@ async function applyLeave({
         throw new Error("Login session is missing empId or userId.");
     }
 
-    const payload = {
+    const contactNum = getUserContactNumber(user) || process.env.CONTACT_NUM;
+    let poId = getUserPoIds(user);
+    if (!poId.length && process.env.PO_ID) {
+        poId = toNumberArray(process.env.PO_ID);
+    }
+
+    const basePayload = {
         empId: user.empId,
-        userId: user.userId,
-        leaveDate: {
-            fromDate,
-            toDate
-        },
+        userId: Number(user.userId),
         leaveDuration,
         leaveReason,
         leaveType
     };
 
-    if (process.env.CONTACT_NUM) {
-        payload.contactNum = process.env.CONTACT_NUM;
+    if (contactNum) {
+        basePayload.contactNum = contactNum;
     }
 
-    if (process.env.PO_ID) {
-        payload.poId = [Number(process.env.PO_ID)];
+    if (poId.length) {
+        basePayload.poId = poId;
     }
 
-    const leavePaths = [
-        "/employee/leaveRequest",
-        "/employee/leave-request",
-        "/employee/markLeave"
+    const payloadVariants = [
+        {
+            ...basePayload,
+            dateTime1: now,
+            dateTime2: now,
+            leaveDate: [fromDate, toDate]
+        },
+        {
+            ...basePayload,
+            dateTime1: now,
+            dateTime2: now,
+            leaveDate: {
+                fromDate,
+                toDate
+            }
+        },
+        {
+            ...basePayload,
+            leaveDate: {
+                fromDate,
+                toDate
+            }
+        }
     ];
 
-    let lastAttempt = null;
+    const normalizePath = (path) =>
+        path && path.startsWith("/") ? path : path ? `/${path}` : path;
+
+    const leavePaths = [
+        normalizePath(process.env.HRMS_MARK_LEAVE_PATH),
+        "/employee/markLeave",
+        "/employee/leaveRequest",
+        "/employee/leave-request",
+        "/markLeave",
+        "/leaveRequest",
+        "/leave-request"
+    ].filter(Boolean);
+
+    let lastError = null;
 
     for (const path of leavePaths) {
-        try {
-            console.log(`[HRMS] applyLeave trying ${path} with base ${api.defaults.baseURL}`);
-            const response = await api.post(path, payload);
-
-            if (response.status >= 200 && response.status < 300) {
-                return response.data;
+        for (const payload of payloadVariants) {
+            try {
+                console.log(`[HRMS] applyLeave trying ${path} with payload:`, payload);
+                return await request(api, "post", path, payload);
+            } catch (error) {
+                lastError = error;
+                const status = error.statusCode || error.response?.status;
+                if (status !== 404 && status !== 405) {
+                    console.warn(`[HRMS] applyLeave failed for ${path}:`, error.message);
+                }
             }
-
-            lastAttempt = { path, response };
-
-            if (
-                response.status === 404 ||
-                response.status === 405 ||
-                (typeof response.data === "string" && response.data.includes("Cannot POST"))
-            ) {
-                continue;
-            }
-
-            throw new Error(
-                `HRMS applyLeave failed for ${path}: status ${response.status}, response=${JSON.stringify(response.data)}`
-            );
-        } catch (error) {
-            lastAttempt = { path, error };
         }
     }
 
-    const responseDetails = lastAttempt?.response
-        ? `status ${lastAttempt.response.status}, body=${JSON.stringify(lastAttempt.response.data)}`
-        : lastAttempt?.error?.message || "no response";
-
-    throw new Error(
-        `Leave application failed after trying paths ${leavePaths.join(", ")}. ${responseDetails}`
-    );
+    throw lastError || new Error("HRMS leave application failed for all known endpoints.");
 }
 
 module.exports = {

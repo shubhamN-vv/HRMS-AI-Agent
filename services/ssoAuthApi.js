@@ -58,8 +58,6 @@ function normalizeSsoUser(user = {}) {
         return {};
     }
 
-    console.log("Normalizing SSO user data:", user);
-
     return {
         ...user,
         userId:

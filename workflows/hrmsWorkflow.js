@@ -158,6 +158,9 @@ const openAiTools = [
 ];
 
 const client = createOpenAIClient();
+// Increase default OpenAI timeout and attempts to handle longer-running completions
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS) || 120000; // 120s
+const OPENAI_ATTEMPTS = Number(process.env.OPENAI_ATTEMPTS) || 3;
 
 function createToolSchema(name, description, properties = {}, required = []) {
     return {
@@ -218,23 +221,141 @@ async function runToolCall(toolCall, toolMap) {
     return hrmsTool.invoke(parseToolArgs(toolCall.function.arguments));
 }
 
+function promiseWithTimeout(promise, timeoutMs) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`OpenAI request timed out after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function attemptOpenAIRequest(payload, attempts = OPENAI_ATTEMPTS, timeoutMs = OPENAI_TIMEOUT_MS) {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        const start = Date.now();
+        try {
+            const resp = await promiseWithTimeout(
+                client.chat.completions.create(payload),
+                timeoutMs
+            );
+
+            const duration = Date.now() - start;
+            console.log("[HRMS CHAT] OpenAI request succeeded", {
+                model: payload.model,
+                attempt,
+                duration
+            });
+
+            return resp;
+        } catch (err) {
+            const duration = Date.now() - start;
+            console.error("[HRMS CHAT] OpenAI attempt failed", {
+                attempt,
+                duration,
+                message: err.message,
+                status: err.response?.status
+            });
+
+            lastError = err;
+
+            if (attempt < attempts) {
+                const backoff = 500 * Math.pow(2, attempt - 1);
+                console.log(`[HRMS CHAT] retrying OpenAI request after ${backoff}ms`);
+                // small sleep before retry
+                // eslint-disable-next-line no-await-in-loop
+                await sleep(backoff);
+            }
+        }
+    }
+
+    throw lastError;
+}
+
+function normalizeToolCalls(message) {
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+        return message.tool_calls;
+    }
+
+    if (message.function_call && message.function_call.name) {
+        return [
+            {
+                type: "function",
+                id: message.function_call.name,
+                function: {
+                    name: message.function_call.name,
+                    arguments: message.function_call.arguments || "{}"
+                }
+            }
+        ];
+    }
+
+    return [];
+}
+
 async function handleHrmsChat({ sessions, sessionId, message }) {
+    console.log("[HRMS CHAT] handleHrmsChat start", { sessionId, message: String(message).slice(0,200) });
     const session = getSession(sessions, sessionId);
     const hrmsTools = createHrmsTools(getAuthContext(session));
     const toolMap = new Map(hrmsTools.map((hrmsTool) => [hrmsTool.name, hrmsTool]));
     const messages = buildMessages(session, message);
 
     for (let iteration = 0; iteration < 6; iteration++) {
-        const response = await client.chat.completions.create({
+        console.log("[HRMS CHAT] requesting OpenAI completion", {
+            sessionId,
             model: getModelName(),
-            temperature: 0,
-            messages,
-            tools: openAiTools,
-            tool_choice: "auto"
+            iteration,
+            messages: messages.map((msg) => ({ role: msg.role, content: msg.content?.slice(0, 200) }))
         });
 
-        const assistantMessage = response.choices[0].message;
-        const toolCalls = assistantMessage.tool_calls || [];
+        let response;
+        try {
+            response = await attemptOpenAIRequest(
+                {
+                    model: getModelName(),
+                    temperature: 0,
+                    messages,
+                    tools: openAiTools,
+                    tool_choice: "auto"
+                },
+                OPENAI_ATTEMPTS,
+                OPENAI_TIMEOUT_MS
+            );
+        } catch (error) {
+            console.error("[HRMS CHAT] OpenAI request failed", {
+                sessionId,
+                message: error.message,
+                code: error.code,
+                status: error.response?.status,
+                responseData: error.response?.data,
+                stack: error.stack
+            });
+
+            const responseDetails = error.response
+                ? `${error.response.status}: ${JSON.stringify(error.response.data)}`
+                : error.message;
+
+            return saveAssistantResponse(
+                session,
+                message,
+                `HRMS AI request failed (${responseDetails}). Please try again or check your model credentials.`
+            );
+        }
+
+        const assistantMessage = response.choices[0]?.message;
+        const toolCalls = normalizeToolCalls(assistantMessage);
+
+        console.log("[HRMS CHAT] OpenAI response", {
+            sessionId,
+            finishReason: response.choices[0]?.finish_reason,
+            toolCalls: toolCalls.length,
+            functionCallName: assistantMessage?.function_call?.name
+        });
 
         messages.push({
             role: "assistant",

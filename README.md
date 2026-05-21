@@ -19,7 +19,9 @@ npm install
 cp .env.example .env
 ```
 
-Set `GITHUB_TOKEN` in `.env`.
+Set either `OPENAI_API_KEY` or `GITHUB_TOKEN` in `.env`.
+If using GitHub marketplace models, set `GITHUB_MODEL=openai/o4-mini`.
+Add any required HRMS values such as `HRMS_API_BASE_URL`, `TENANT_ID`, `HRMS_MARK_LEAVE_PATH`, `CONTACT_NUM`, or `PO_ID` as needed.
 
 ## Run
 

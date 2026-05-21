@@ -17,12 +17,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 function getSessionId(req) {
-    return (
-        req.headers["x-session-id"] ||
-        req.body?.sessionId ||
-        req.query?.sessionId ||
-        ""
-    ).toString();
+    // Enforce header-only session ID for robustness. Use the `x-session-id` header.
+    return (req.headers["x-session-id"] || "").toString();
 }
 
 function getSession(sessionId) {
@@ -48,6 +44,11 @@ function requireSession(req, res, next) {
     const session = getSession(sessionId);
 
     if (!sessionId || !session) {
+        console.warn("[SESSION] No active session", {
+            sessionId,
+            header: req.headers["x-session-id"]
+        });
+
         return res.status(401).json({
             error: "No active session. Please login first."
         });
@@ -93,14 +94,14 @@ app.post("/login/sso", async (req, res) => {
             history: []
         };
 
+        // Unified login audit log: session id, user id, emp id, name, email and request IP
         console.log("[LOGIN SSO] session created", {
             sessionId,
-            user: auth.user && {
-                userId: auth.user.userId,
-                empId: auth.user.empId,
-                email: auth.user.email,
-                userName: auth.user.userName
-            }
+            userId: auth.user?.userId,
+            empId: auth.user?.empId,
+            name: auth.user?.name || auth.user?.userName,
+            email: auth.user?.email,
+            ip: req.ip
         });
 
         return res.json({
@@ -189,6 +190,7 @@ app.post("/chat", requireSession, async (req, res) => {
         });
     }
 });
+
 
 const port = process.env.PORT || 3000;
 

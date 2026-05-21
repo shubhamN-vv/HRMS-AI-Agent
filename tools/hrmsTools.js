@@ -352,6 +352,12 @@ async function runTool(fn) {
     try {
         return toolResult(await fn());
     } catch (error) {
+        if (error.code === "ECONNABORTED" || String(error.message).toLowerCase().includes("timeout")) {
+            return toolError(Object.assign(new Error("HRMS API request timed out. Please try again with a simpler query or check your connection."), {
+                statusCode: 504,
+                response: { data: { message: "HRMS API request timed out." } }
+            }));
+        }
         return toolError(error);
     }
 }

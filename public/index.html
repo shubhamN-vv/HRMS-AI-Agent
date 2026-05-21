@@ -193,22 +193,6 @@
             margin-bottom: 12px;
         }
 
-        .messages {
-            height: 30em;
-            max-height: 30em;
-            overflow-y: auto;
-            border: 1px solid #d9e2ec;
-            border-radius: 8px;
-            padding: 12px;
-            background: #fbfcfd;
-            position: relative;
-        }
-
-        .inputWrapper {
-            position: relative;
-            width: 100%;
-        }
-
         .slash-menu {
             position: absolute;
             bottom: calc(100% + 6px);
@@ -251,19 +235,78 @@
             color: #0f172a;
         }
 
+        .messages-wrapper {
+            position: relative;
+        }
+
+        .messages {
+            height: 30em;
+            max-height: 30em;
+            overflow-y: auto;
+            border: 1px solid #d9e2ec;
+            border-radius: 8px;
+            padding: 12px;
+            padding-bottom: 48px;
+            background: #fbfcfd;
+        }
+
         .busy {
             align-items: center;
             background: rgba(11, 114, 133, 0.08);
-            border-radius: 8px;
+            border-radius: 999px;
             color: #52606d;
             display: flex;
-            gap: 8px;
-            padding: 5px 10px;
+            height: 40px;
+            min-width: 56px;
+            justify-content: center;
+            padding: 0 14px;
             position: absolute;
             left: 12px;
             bottom: 12px;
-            width: fit-content;
-            z-index: 2;
+            z-index: 5;
+        }
+
+        .busy .dots {
+            font-size: 24px;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .inputWrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .stop-icon {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            width: 38px;
+            height: 38px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.08);
+            color: #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .stop-icon:hover {
+            background: rgba(11, 114, 133, 0.18);
+        }
+
+        .stop-icon.hidden {
+            display: none;
+        }
+
+        .inputWrapper textarea {
+            padding-right: 58px;
         }
 
         #chatSection {
@@ -319,7 +362,8 @@
                 <button id="logoutButton" class="secondary compact" style="font-size: small;">Logout</button>
             </div>
             <p id="userInfo" class="meta"></p>
-            <div id="messages" class="messages">
+            <div class="messages-wrapper">
+                <div id="messages" class="messages"></div>
                 <div id="busyIndicator" class="busy hidden">
                     <span class="dots"></span>
                 </div>
@@ -327,6 +371,9 @@
             <label for="message">Message</label>
             <div class="inputWrapper">
                 <textarea id="message" placeholder=""></textarea>
+                <button id="stopButton" class="stop-icon hidden" type="button" aria-label="Stop">
+                    &#x23F9;
+                </button>
                 <div id="slashMenu" class="slash-menu hidden"></div>
             </div>
         </section>
@@ -364,6 +411,7 @@
         const microsoftLoginButton = document.getElementById("microsoftLoginButton");
         const logoutButton = document.getElementById("logoutButton");
         const busyIndicator = document.getElementById("busyIndicator");
+        const stopButton = document.getElementById("stopButton");
         const slashMenu = document.getElementById("slashMenu");
         const defaultPlaceholder = messageInput.placeholder;
         const slashModules = [
@@ -379,6 +427,9 @@
         ];
 
         let busyTimer = null;
+        let fetchTimeoutId = null;
+        let currentFetchController = null;
+        let currentRequestTimedOut = false;
         let selectedSlashIndex = -1;
         let sessionId = localStorage.getItem("hrmsSessionId");
 
@@ -426,6 +477,12 @@
                 : defaultPlaceholder;
             closeSlashMenu();
             busyIndicator.style.display = "none";
+            messageInput.disabled = false;
+            logoutButton.disabled = false;
+            stopButton.classList.add("hidden");
+            stopButton.disabled = true;
+            currentFetchController = null;
+            messageInput.focus();
         }
 
         function showToast(message, type = "success") {
@@ -471,11 +528,17 @@
             loginStatus.textContent = "";
             messageInput.placeholder = defaultPlaceholder;
             busyIndicator.style.display = "none";
+            setBusy(false);
+            stopButton.classList.add("hidden");
+            stopButton.disabled = true;
         }
 
         function clearLocalSession(message) {
             sessionId = null;
             localStorage.removeItem("hrmsSessionId");
+            setBusy(false);
+            stopButton.classList.add("hidden");
+            stopButton.disabled = true;
             showLogin();
             loginStatus.textContent = message || "Please login again.";
         }
@@ -555,9 +618,23 @@
         }
 
         async function sendMessage(text) {
+            if (!text || messageInput.disabled) {
+                return;
+            }
+
             addMessage(text, "user");
             messageInput.value = "";
             setBusy(true);
+            stopButton.classList.remove("hidden");
+            stopButton.disabled = false;
+            currentRequestTimedOut = false;
+
+            currentFetchController = new AbortController();
+            // Align frontend timeout with backend `OPENAI_TIMEOUT_MS` (120s)
+            fetchTimeoutId = setTimeout(() => {
+                currentRequestTimedOut = true;
+                currentFetchController?.abort();
+            }, 120000);
 
             try {
                 const response = await fetch("/chat", {
@@ -570,6 +647,7 @@
                         sessionId,
                         message: text,
                     }),
+                    signal: currentFetchController.signal,
                 });
 
                 const data = await response.json();
@@ -581,9 +659,24 @@
 
                 addMessage(data.message || data.error || "No response", "agent");
             } catch (error) {
-                addMessage("Unable to reach HRMS AI. Please try again.", "agent");
+                if (error.name === "AbortError") {
+                    if (currentRequestTimedOut) {
+                        addMessage("Request timed out after 120 seconds. Please try again with a simpler query or check your connection.", "agent");
+                    } else {
+                        addMessage("Request cancelled.", "agent");
+                    }
+                } else {
+                    addMessage("Unable to reach HRMS AI. Please try again.", "agent");
+                }
             } finally {
+                if (fetchTimeoutId) {
+                    clearTimeout(fetchTimeoutId);
+                    fetchTimeoutId = null;
+                }
                 setBusy(false);
+                stopButton.classList.add("hidden");
+                currentFetchController = null;
+                messageInput.focus();
             }
         }
 
@@ -683,11 +776,29 @@
             }
         }
 
+        stopButton.addEventListener("click", () => {
+            if (currentFetchController) {
+                currentFetchController.abort();
+                if (fetchTimeoutId) {
+                    clearTimeout(fetchTimeoutId);
+                    fetchTimeoutId = null;
+                }
+                stopButton.disabled = true;
+                stopButton.classList.add("hidden");
+                currentFetchController = null;
+                setBusy(false);
+                messageInput.focus();
+            }
+        });
+
         async function logout() {
             const activeSessionId = sessionId;
 
             sessionId = null;
             localStorage.removeItem("hrmsSessionId");
+            setBusy(false);
+            stopButton.classList.add("hidden");
+            stopButton.disabled = true;
 
             if (activeSessionId) {
                 await fetch("/logout", {
