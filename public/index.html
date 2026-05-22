@@ -168,16 +168,29 @@
         .message {
             white-space: pre-wrap;
             padding: 10px;
-            border-radius: 8px;
+            border-radius: 12px;
             margin-bottom: 10px;
+            max-width: 70%;
+            display: inline-block;
+            clear: both;
+        }
+
+        .messages::after {
+            content: "";
+            display: block;
+            clear: both;
         }
 
         .user {
             background: #d9f0f4;
+            float: right;
+            text-align: right;
         }
 
         .agent {
             background: #edf2f7;
+            float: left;
+            text-align: left;
         }
 
         .meta {
