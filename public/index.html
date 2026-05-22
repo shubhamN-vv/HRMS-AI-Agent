@@ -64,6 +64,53 @@
             overflow-y: auto;
         }
 
+        /* contenteditable input — same look as the original textarea */
+        #message {
+            display: block;
+            border: 1px solid #bcccdc;
+            border-radius: 6px;
+            padding: 10px;
+            padding-right: 58px;
+            width: 100%;
+            min-height: 88px;
+            max-height: 200px;
+            overflow-y: auto;
+            box-sizing: border-box;
+            font: inherit;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #1f2933;
+            background: #ffffff;
+            white-space: pre-wrap;
+            word-break: break-word;
+            outline: none;
+            cursor: text;
+        }
+
+        #message:focus {
+            border-color: #0b7285;
+        }
+
+        #message[data-empty="true"]::before {
+            content: attr(data-placeholder);
+            color: #9aa5b1;
+            pointer-events: none;
+        }
+
+        #message[aria-disabled="true"] {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* Blue module token inside the input */
+        #message .tok {
+            color: #2563eb;
+            font-weight: 700;
+            border-radius: 3px;
+            background: rgba(37, 99, 235, 0.08);
+            /* prevent editing inside the span */
+        }
+
         button {
             border: 0;
             background: #0b7285;
@@ -318,7 +365,7 @@
             display: none;
         }
 
-        .inputWrapper textarea {
+        .inputWrapper #message {
             padding-right: 58px;
         }
 
@@ -344,6 +391,11 @@
         .login-header p {
             color: #52606d;
             font-size: 14px;
+        }
+
+        .module-highlight {
+            color: #2563eb;
+            font-weight: 700;
         }
     </style>
 </head>
@@ -389,7 +441,7 @@
             </div>
             <label for="message">Message</label>
             <div class="inputWrapper">
-                <textarea id="message" placeholder=""></textarea>
+                <div id="message" contenteditable="true" role="textbox" aria-multiline="true" data-empty="true" data-placeholder="" spellcheck="true"></div>
                 <button id="stopButton" class="stop-icon hidden" type="button" aria-label="Stop">
                     &#x23F9;
                 </button>
@@ -433,7 +485,7 @@
         const busyIndicator = document.getElementById("busyIndicator");
         const stopButton = document.getElementById("stopButton");
         const slashMenu = document.getElementById("slashMenu");
-        const defaultPlaceholder = messageInput.placeholder;
+        const defaultPlaceholder = messageInput.dataset.placeholder;
 
         // Hide the old login section and show only the loading screen.
         if (loadingSection) {
@@ -505,12 +557,13 @@
 
             userInfo.textContent = displayUser;
             
-            messageInput.placeholder = user
+            messageInput.dataset.placeholder = user
                 ? `Hi ${userName || "there"}, how can I help you today?`
                 : defaultPlaceholder;
+            inputSetEmpty(true);
             closeSlashMenu();
             busyIndicator.style.display = "none";
-            messageInput.disabled = false;
+            inputSetDisabled(false);
             logoutButton.disabled = false;
             stopButton.classList.add("hidden");
             stopButton.disabled = true;
@@ -547,9 +600,35 @@
         function addMessage(text, type) {
             const node = document.createElement("div");
             node.className = `message ${type}`;
-            node.textContent = text;
+            node.innerHTML = formatModules(text);
             messages.appendChild(node);
             messages.scrollTop = messages.scrollHeight;
+        }
+
+        function formatModules(text) {
+            const modules = [
+                "leave", 
+                "wfh", 
+                "projects", 
+                "holidays", 
+                "attendance", 
+                "punching-report", 
+                "daily-status-report",
+                "down-time",
+                "tickets"
+            ];
+
+            let formatted = text;
+
+            modules.forEach(mod => {
+                // Match /mod or bare mod — always render as /mod in blue
+                const regex = new RegExp(`\\/?\\b(${mod})\\b`, "gi");
+                formatted = formatted.replace(regex, (_, name) =>
+                    `<span class="module-highlight">/${name}</span>`
+                );
+            });
+
+            return formatted;
         }
 
         function showLogin() {
@@ -559,7 +638,8 @@
             );
             userInfo.textContent = "";
             loginStatus.textContent = "";
-            messageInput.placeholder = defaultPlaceholder;
+            messageInput.dataset.placeholder = defaultPlaceholder;
+            inputClear();
             busyIndicator.style.display = "none";
             setBusy(false);
             stopButton.classList.add("hidden");
@@ -655,12 +735,12 @@
         }
 
         async function sendMessage(text) {
-            if (!text || messageInput.disabled) {
+            if (!text || messageInput.getAttribute("aria-disabled") === "true") {
                 return;
             }
 
             addMessage(text, "user");
-            messageInput.value = "";
+            inputClear();
             setBusy(true);
             stopButton.classList.remove("hidden");
             stopButton.disabled = false;
@@ -721,9 +801,75 @@
             microsoftLoginButton.disabled = isBusy;
         }
 
+        // ── contenteditable helpers ───────────────────────────────────────────
+
+        // Get plain text of the div, collapsing .tok spans to their text
+        function inputGetText() {
+            return messageInput.innerText.replace(/\n$/, "").trim();
+        }
+
+        // Clear all content and reset empty state
+        function inputClear() {
+            messageInput.innerHTML = "";
+            inputSetEmpty(true);
+        }
+
+        function inputSetEmpty(isEmpty) {
+            messageInput.dataset.empty = isEmpty ? "true" : "false";
+        }
+
+        function inputSetDisabled(disabled) {
+            messageInput.contentEditable = disabled ? "false" : "true";
+            messageInput.setAttribute("aria-disabled", disabled ? "true" : "false");
+        }
+
+        // Get text before the caret inside messageInput
+        function getTextBeforeCaret() {
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return "";
+            const range = sel.getRangeAt(0).cloneRange();
+            range.selectNodeContents(messageInput);
+            range.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+            return range.toString();
+        }
+
+        // Replace the last N characters before the caret with a .tok span + trailing space text node
+        function insertToken(moduleName, deleteLen) {
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+
+            // Delete the typed chars
+            const range = sel.getRangeAt(0).cloneRange();
+            range.setStart(range.startContainer, range.startOffset - deleteLen);
+            range.deleteContents();
+
+            // Insert blue span
+            const span = document.createElement("span");
+            span.className = "tok";
+            span.textContent = "/" + moduleName;
+            span.contentEditable = "false"; // non-editable atom
+
+            // Insert a plain space after it so cursor lands in normal text
+            const space = document.createTextNode(" ");
+
+            const insertRange = sel.getRangeAt(0);
+            insertRange.insertNode(space);
+            insertRange.insertNode(span);
+
+            // Move caret after the space
+            const newRange = document.createRange();
+            newRange.setStartAfter(space);
+            newRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(newRange);
+
+            inputSetEmpty(inputGetText() === "");
+        }
+
+        // ── slash menu ────────────────────────────────────────────────────────
+
         function getSlashQuery() {
-            const cursor = messageInput.selectionStart;
-            const textBefore = messageInput.value.slice(0, cursor);
+            const textBefore = getTextBeforeCaret();
             const match = /(?:^|\s)(\/[^\s]*)$/.exec(textBefore);
             return match ? match[1] : null;
         }
@@ -768,20 +914,11 @@
         }
 
         function selectSlashModule(module) {
-            const cursor = messageInput.selectionStart;
-            const textBefore = messageInput.value.slice(0, cursor);
-            const textAfter = messageInput.value.slice(cursor);
+            const textBefore = getTextBeforeCaret();
             const match = /(?:^|\s)(\/[^\s]*)$/.exec(textBefore);
-            if (!match) {
-                return;
-            }
-
-            const prefix = textBefore.slice(0, match.index);
-            const insertion = module + " ";
-            messageInput.value = prefix + insertion + textAfter;
-            messageInput.focus();
-            const newCursor = prefix.length + insertion.length;
-            messageInput.setSelectionRange(newCursor, newCursor);
+            if (!match) return;
+            // deleteLen = typed chars e.g. "/wf" = 3
+            insertToken(module, match[1].length);
             closeSlashMenu();
         }
 
@@ -792,12 +929,25 @@
         }
 
         function handleMessageInput() {
+            inputSetEmpty(inputGetText() === "");
+            checkBareModuleWord();
             renderSlashMenu();
+        }
+
+        // Auto-convert bare module word typed + space → /module token
+        function checkBareModuleWord() {
+            const textBefore = getTextBeforeCaret();
+            const match = /(?:^|\s)([a-z][a-z0-9-]*)\s$/i.exec(textBefore);
+            if (!match) return;
+            const word = match[1].toLowerCase();
+            if (!slashModules.includes(word)) return;
+            // deleteLen = word + the space = match[1].length + 1
+            insertToken(word, match[1].length + 1);
         }
 
         function setBusy(isBusy) {
             logoutButton.disabled = isBusy;
-            messageInput.disabled = isBusy;
+            inputSetDisabled(isBusy);
 
             if (busyTimer) {
                 clearTimeout(busyTimer);
@@ -902,7 +1052,7 @@
             if (slashMenu.classList.contains("hidden")) {
                 if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    const text = messageInput.value.trim();
+                    const text = inputGetText();
                     if (text) {
                         sendMessage(text);
                     }
@@ -935,7 +1085,7 @@
                 if (selectedSlashIndex >= 0 && buttons.length) {
                     buttons[selectedSlashIndex].click();
                 } else {
-                    const text = messageInput.value.trim();
+                    const text = inputGetText();
                     if (text) {
                         sendMessage(text);
                     }
