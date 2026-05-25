@@ -2,6 +2,9 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const http = require('http');
+const assert = require('assert');
+
+let lastLeavePayload = null;
 
 async function startMockServer(port = 4000) {
   const app = express();
@@ -71,6 +74,7 @@ async function startMockServer(port = 4000) {
   });
 
   app.post('/employee/leaveRequest', (req, res) => {
+    lastLeavePayload = req.body;
     res.json(ok({ applied: true, payload: req.body }));
   });
 
@@ -113,8 +117,28 @@ async function runTests() {
     { name: 'submitDailyStatusReport', fn: () => services.submitDailyStatusReport({ tasks: [{ projectId: 'VVPL002', taskDetails: 'Test', taskMinutes: 30, taskStatus: 'Inprogress', workingDate: '2026-05-20' }], authContext }) },
     { name: 'markDownTime', fn: () => services.markDownTime({ date: '2026-05-20', departmentId: 131, description: 'Test downtime', endTime: '2026-05-20T12:00:00Z', name: 'Tester', poId: [245], startTime: '2026-05-20T10:00:00Z', subject: 'Test', authContext }) },
     { name: 'createTicket', fn: () => services.createTicket({ assigned_to: 999, description: 'Issue', priority: 'low', title: 'Bug', authContext }) },
-    { name: 'applyLeave', fn: () => services.applyLeave({ fromDate: '2026-05-21', toDate: '2026-05-21', leaveReason: 'WFH', leaveType: 'work_from_home', leaveDuration: 'fullDay', authContext }) }
+    {
+      name: 'applyLeave',
+      fn: async () => {
+        const result = await services.applyLeave({ fromDate: '2026-06-21', toDate: '2026-06-21', leaveReason: 'WFH', leaveType: 'work_from_home', leaveDuration: 'fullDay', authContext });
+        assert.strictEqual(lastLeavePayload.dateTime1.slice(0, 10), '2026-06-21');
+        assert.strictEqual(lastLeavePayload.dateTime2.slice(0, 10), '2026-06-21');
+        return result;
+      }
+    },
+    {
+      name: 'applyLeave rejects past date',
+      fn: async () => {
+        await assert.rejects(
+          () => services.applyLeave({ fromDate: '2026-05-01', toDate: '2026-05-01', leaveReason: 'Past', leaveType: 'sick_and_casual_leave', leaveDuration: 'fullDay', authContext }),
+          /past dates/
+        );
+        return { rejected: true };
+      }
+    }
   ];
+
+  let failed = false;
 
   for (const t of tests) {
     try {
@@ -122,11 +146,16 @@ async function runTests() {
       const r = await t.fn();
       console.log(`[OK] ${t.name}:`, JSON.stringify(r).slice(0, 400));
     } catch (err) {
+      failed = true;
       console.error(`[ERR] ${t.name}:`, err.message || err);
     }
   }
 
   mock.close(() => console.log('[TEST] Mock HRMS server stopped'));
+
+  if (failed) {
+    throw new Error('One or more smoke tests failed');
+  }
 }
 
 runTests().catch((e) => {

@@ -15,6 +15,7 @@ const {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/assets", express.static(path.join(__dirname, "assets")));
 
 function getSessionId(req) {
     // Enforce header-only session ID for robustness. Use the `x-session-id` header.

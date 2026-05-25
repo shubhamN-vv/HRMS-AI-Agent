@@ -158,6 +158,50 @@ function getUserPoIds(user = {}) {
     return toNumberArray(candidate);
 }
 
+function toLeaveDateTime(date, fallbackTime = "00:00:00") {
+    if (!date) {
+        return date;
+    }
+
+    const value = String(date).trim();
+    if (value.includes("T")) {
+        return value.replace("T", " ").slice(0, 19);
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return `${value} ${fallbackTime}`;
+    }
+
+    return value;
+}
+
+function getCurrentDateInTimeZone(timeZone = "Asia/Kolkata") {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(new Date());
+
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+}
+
+function isIsoDate(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function assertNoPastLeaveDate(fromDate, toDate) {
+    if (!isIsoDate(fromDate) || !isIsoDate(toDate)) {
+        throw new Error("Leave/WFH dates must use YYYY-MM-DD format.");
+    }
+
+    const today = getCurrentDateInTimeZone();
+    if (fromDate < today || toDate < today) {
+        throw new Error(`Cannot apply leave/WFH for past dates. Today is ${today}.`);
+    }
+}
+
 function isJwtExpired(token) {
     const claims = decodeJwt(token);
 
@@ -476,7 +520,9 @@ async function applyLeave({
 }) {
     const api = createEmployeeApi(authContext);
     const user = getUserClaims(authContext);
-    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    assertNoPastLeaveDate(fromDate, toDate);
+    const fromDateTime = toLeaveDateTime(fromDate, "00:00:00");
+    const toDateTime = toLeaveDateTime(toDate, "23:59:59");
 
     if (!user.empId || !user.userId) {
         throw new Error("Login session is missing empId or userId.");
@@ -507,14 +553,14 @@ async function applyLeave({
     const payloadVariants = [
         {
             ...basePayload,
-            dateTime1: now,
-            dateTime2: now,
+            dateTime1: fromDateTime,
+            dateTime2: toDateTime,
             leaveDate: [fromDate, toDate]
         },
         {
             ...basePayload,
-            dateTime1: now,
-            dateTime2: now,
+            dateTime1: fromDateTime,
+            dateTime2: toDateTime,
             leaveDate: {
                 fromDate,
                 toDate

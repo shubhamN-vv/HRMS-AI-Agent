@@ -1,5 +1,10 @@
 HRMS AI Agent
 =============
+Agent Response Style
+--------------------
+- Use very less and optimized tokens.
+- Keep answers concise.
+- Avoid long explanations unless explicitly asked.
 
 Overview
 --------
