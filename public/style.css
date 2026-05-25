@@ -237,6 +237,8 @@ button:disabled {
 }
 
 .message {
+    position: relative;
+    z-index: 3;
     white-space: pre-wrap;
     padding: 10px;
     border-radius: 12px;
@@ -253,13 +255,13 @@ button:disabled {
 }
 
 .user {
-    background: #d9f0f4;
+    background: rgba(217, 240, 244, 0.82);
     float: right;
     text-align: right;
 }
 
 .agent {
-    background: #edf2f7;
+    background: rgba(237, 242, 247, 0.82);
     float: left;
     text-align: left;
 }
@@ -332,7 +334,7 @@ button:disabled {
     background-position: center;
     background-size: 500px;
     pointer-events: none;
-    opacity: 0.9;
+    opacity: 1;
     z-index: 1;
 }
 
@@ -345,7 +347,7 @@ button:disabled {
     border-radius: 8px;
     padding: 12px;
     padding-bottom: 48px;
-    background: rgba(251, 252, 253, 0.72);
+    background: rgba(251, 252, 253, 0.42);
     z-index: 2;
 }
 

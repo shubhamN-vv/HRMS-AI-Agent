@@ -163,7 +163,11 @@ function showToast(message, type = "success") {
 function addMessage(text, type) {
     const node = document.createElement("div");
     node.className = `message ${type}`;
-    node.innerHTML = formatModules(text);
+    if (type === "user") {
+        node.innerHTML = formatModules(text);
+    } else {
+        node.textContent = text;
+    }
     messages.appendChild(node);
     messages.scrollTop = messages.scrollHeight;
 }
@@ -175,7 +179,7 @@ function formatModules(text) {
         // Match /mod or bare mod — always render as /mod in blue
         const regex = new RegExp(`\\/?\\b(${mod})\\b`, "gi");
         formatted = formatted.replace(regex, (_, name) =>
-            `<span class="module-highlight">/${name}</span>`
+            `<span class="module-highlight">${name}</span>`
         );
     });
 
@@ -392,7 +396,7 @@ function getTextBeforeCaret() {
 }
 
 function shortcutText(shortcut) {
-    return [shortcut.before, `/${shortcut.module}`, shortcut.after]
+    return [shortcut.before, shortcut.module, shortcut.after]
         .filter(Boolean)
         .join(" ");
 }
@@ -405,7 +409,7 @@ function createModuleText(shortcut) {
 
     const module = document.createElement("span");
     module.className = "tok-module";
-    module.textContent = "/" + shortcut.module;
+    module.textContent = shortcut.module;
     fragment.appendChild(module);
 
     if (shortcut.after) {
@@ -422,7 +426,7 @@ function createToken(moduleName) {
     span.contentEditable = "false";
 
     const label = document.createElement("span");
-    label.textContent = "/" + moduleName;
+    label.textContent = moduleName;
     span.appendChild(label);
 
     return span;
