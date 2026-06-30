@@ -13,8 +13,11 @@ const {
     getProjectTeamReport,
     getLeaveTypeLeaveCount,
     getActiveTickets,
+    deletePendingLeaveRequest,
     submitDailyStatusReport,
     markDownTime,
+    getDownTimeRequests,
+    deletePendingDownTime,
     createTicket,
     applyLeave
 } = require("../services/hrmsApi");
@@ -75,8 +78,11 @@ function createHrmsTools(authContext = {}) {
         createProjectTeamReportTool(authContext),
         createDailyStatusReportTool(authContext),
         createMarkDownTimeTool(authContext),
+        createDownTimeRequestsTool(authContext),
+        createDeleteDownTimeTool(authContext),
         createTicketTool(authContext),
         createDepartmentDropdownTool(authContext),
+        createDeleteLeaveTool(authContext),
         createApplyLeaveTool(authContext)
     ];
 }
@@ -87,7 +93,7 @@ function createLeaveContextTool(authContext) {
         {
             name: "get_employee_leave_context",
             description:
-                "Get live HRMS leave context, including supported leave types and the employee's recent leave or WFH requests."
+                "Get live HRMS leave context, including supported leave types and the employee's recent leave or WFH requests with status."
         }
     );
 }
@@ -270,10 +276,49 @@ function createMarkDownTimeTool(authContext) {
                 departmentId: z.number().int().describe("Department identifier (get from get_department_dropdown)"),
                 description: z.string().describe("Detailed downtime description"),
                 endTime: z.string().describe("Downtime end time in ISO 8601 format (e.g., 2026-05-18T11:54:02.010Z)"),
-                name: z.string().describe("Employee name"),
-                poId: z.array(z.number().int()).describe("Project owner IDs (e.g., [249])"),
+                name: z.string().optional().describe("Employee name. Defaults to session user name."),
+                poId: z.array(z.number().int()).optional().describe("Project owner IDs. Defaults to session token poId or PO_ID env."),
                 startTime: z.string().describe("Downtime start time in ISO 8601 format (e.g., 2026-05-18T10:54:02.010Z)"),
                 subject: z.string().describe("Downtime subject/title")
+            })
+        }
+    );
+}
+
+function createDownTimeRequestsTool(authContext) {
+    return tool(
+        async ({ skip = 0, limit = 100 } = {}) => runTool(() => getDownTimeRequests({
+            skip,
+            limit,
+            authContext
+        })),
+        {
+            name: "get_down_time_requests",
+            description:
+                "Get existing downtime requests for matching pending downtime by date before deletion.",
+            schema: z.object({
+                skip: z.number().int().optional(),
+                limit: z.number().int().optional()
+            })
+        }
+    );
+}
+
+function createDeleteDownTimeTool(authContext) {
+    return tool(
+        async (input) => runTool(() => deletePendingDownTime({
+            ...input,
+            authContext
+        })),
+        {
+            name: "delete_pending_down_time",
+            description:
+                "Delete an existing pending downtime request. Fetches downtime requests, matches date and pending status, then deletes by downtime id.",
+            schema: z.object({
+                date: z.string().describe("Downtime date to delete in YYYY-MM-DD format"),
+                id: z.number().int().optional().describe("Optional HRMS downtime id"),
+                downTimeId: z.number().int().optional().describe("Optional HRMS downtime id"),
+                downtimeId: z.number().int().optional().describe("Optional HRMS downtime id")
             })
         }
     );
@@ -313,6 +358,26 @@ function createDepartmentDropdownTool() {
             description:
                 "Get the HRMS department dropdown options for downtime submission.",
             schema: z.object({})
+        }
+    );
+}
+
+function createDeleteLeaveTool(authContext) {
+    return tool(
+        async (input) => runTool(() => deletePendingLeaveRequest({
+            ...input,
+            authContext
+        })),
+        {
+            name: "delete_pending_leave_request",
+            description:
+                "Delete an existing pending leave request. Fetches leave requests, matches exact date and pending status, then deletes by HRMS leave id. Approved/rejected leave cannot be deleted.",
+            schema: z.object({
+                date: z.string().describe("Leave date to delete in YYYY-MM-DD format"),
+                id: z.number().int().optional().describe("Optional HRMS leave request id"),
+                leaveId: z.number().int().optional().describe("Optional HRMS leave request id"),
+                leaveType: leaveTypeSchema.optional().describe("Optional leave type to match")
+            })
         }
     );
 }

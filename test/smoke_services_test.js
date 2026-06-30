@@ -5,6 +5,8 @@ const http = require('http');
 const assert = require('assert');
 
 let lastLeavePayload = null;
+let deletedLeaveId = null;
+let deletedDownTimeId = null;
 
 async function startMockServer(port = 4000) {
   const app = express();
@@ -18,7 +20,12 @@ async function startMockServer(port = 4000) {
   });
 
   app.get('/employee/leaveRequest', (req, res) => {
-    res.json(ok([{ id: 101, fromDate: '2026-05-20', toDate: '2026-05-20', leaveType: 'work_from_home' }]));
+    res.json(ok({
+      rows: [
+        { id: 101, fromDate: '2026-05-20', toDate: '2026-05-20', leaveType: 'work_from_home', universalLeaveStatus: 0 },
+        { id: 3356, leaveFrom: '2026-05-26T18:30:00.000Z', leaveTo: '2026-05-26T18:30:00.000Z', leaveType: 'sick_and_casual_leave', universalLeaveStatus: 0 }
+      ]
+    }));
   });
 
   app.get('/employee/allEmployee-leave', (req, res) => {
@@ -69,6 +76,19 @@ async function startMockServer(port = 4000) {
     res.json(ok({ marked: true, payload: req.body }));
   });
 
+  app.get('/employee/downTime', (req, res) => {
+    res.json(ok({
+      rows: [
+        { id: 994, date: '2026/05/26', departmentId: 131, description: 'testing', status: 0 }
+      ]
+    }));
+  });
+
+  app.patch('/employee/deleteDownTime/:id', (req, res) => {
+    deletedDownTimeId = req.params.id;
+    res.json({ status: true, message: 'Downtime deleted', statusCode: 200 });
+  });
+
   app.post('/ticket/create-ticket', (req, res) => {
     res.json(ok({ ticketId: 555, ...req.body }));
   });
@@ -76,6 +96,11 @@ async function startMockServer(port = 4000) {
   app.post('/employee/leaveRequest', (req, res) => {
     lastLeavePayload = req.body;
     res.json(ok({ applied: true, payload: req.body }));
+  });
+
+  app.patch('/employee/deleteLeaveRequest/:id', (req, res) => {
+    deletedLeaveId = req.params.id;
+    res.json({ status: true, message: 'Leave request deleted', statusCode: 200 });
   });
 
   app.post('/leaveRequest', (req, res) => {
@@ -100,7 +125,7 @@ async function runTests() {
 
   const authContext = {
     token: 'dev-token',
-    user: { userId: 999, empId: 111 }
+    user: { userId: 999, empId: 111, name: 'Tester', poId: [245] }
   };
 
   const tests = [
@@ -115,8 +140,24 @@ async function runTests() {
     { name: 'getLeaveTypeLeaveCount', fn: () => services.getLeaveTypeLeaveCount({ userId: 999, authContext }) },
     { name: 'getActiveTickets', fn: () => services.getActiveTickets({ userId: 999, authContext }) },
     { name: 'submitDailyStatusReport', fn: () => services.submitDailyStatusReport({ tasks: [{ projectId: 'VVPL002', taskDetails: 'Test', taskMinutes: 30, taskStatus: 'Inprogress', workingDate: '2026-05-20' }], authContext }) },
-    { name: 'markDownTime', fn: () => services.markDownTime({ date: '2026-05-20', departmentId: 131, description: 'Test downtime', endTime: '2026-05-20T12:00:00Z', name: 'Tester', poId: [245], startTime: '2026-05-20T10:00:00Z', subject: 'Test', authContext }) },
+    { name: 'markDownTime', fn: () => services.markDownTime({ date: '2026-05-20', departmentId: 131, description: 'Test downtime', endTime: '2026-05-20T12:00:00Z', startTime: '2026-05-20T10:00:00Z', subject: 'Test', authContext }) },
+    {
+      name: 'deletePendingDownTime',
+      fn: async () => {
+        const result = await services.deletePendingDownTime({ date: '2026/05/26', authContext });
+        assert.strictEqual(deletedDownTimeId, '994');
+        return result;
+      }
+    },
     { name: 'createTicket', fn: () => services.createTicket({ assigned_to: 999, description: 'Issue', priority: 'low', title: 'Bug', authContext }) },
+    {
+      name: 'deletePendingLeaveRequest',
+      fn: async () => {
+        const result = await services.deletePendingLeaveRequest({ date: '2026-05-27', authContext });
+        assert.strictEqual(deletedLeaveId, '3356');
+        return result;
+      }
+    },
     {
       name: 'applyLeave',
       fn: async () => {

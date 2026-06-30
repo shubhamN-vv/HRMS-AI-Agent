@@ -158,6 +158,23 @@ function getUserPoIds(user = {}) {
     return toNumberArray(candidate);
 }
 
+function extractPoIdsFromProjects(projects) {
+    const rows = Array.isArray(projects?.data) ? projects.data :
+        Array.isArray(projects?.data?.rows) ? projects.data.rows :
+        Array.isArray(projects?.rows) ? projects.rows :
+        Array.isArray(projects) ? projects : [];
+
+    return rows.flatMap((project) => toNumberArray(
+        project.poId ??
+        project.poIds ??
+        project.projectOwnerId ??
+        project.projectOwnerIds ??
+        project.project_owner_id ??
+        project.projectOwner?.id ??
+        project.projectOwner?.userId
+    ));
+}
+
 function toLeaveDateTime(date, fallbackTime = "00:00:00") {
     if (!date) {
         return date;
@@ -191,7 +208,225 @@ function isIsoDate(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
+function normalizeDateOnly(value) {
+    if (!value) {
+        return "";
+    }
+
+    const raw = String(value).trim().replace(/\//g, "-");
+    const numericDate = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/);
+    if (numericDate) {
+        const [, day, month, year] = numericDate;
+        const fullYear = year.length === 2 ? `20${year}` : year;
+        return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+
+    if (raw.includes("T")) {
+        const date = new Date(raw);
+        if (!Number.isNaN(date.getTime())) {
+            const parts = new Intl.DateTimeFormat("en-CA", {
+                timeZone: "Asia/Kolkata",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit"
+            }).formatToParts(date);
+            const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+            return `${values.year}-${values.month}-${values.day}`;
+        }
+    }
+
+    return raw.slice(0, 10);
+}
+
+function isPlainObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasLeaveShape(value = {}) {
+    return isPlainObject(value) && (
+        value.id !== undefined ||
+        value._id !== undefined ||
+        value.leaveId !== undefined ||
+        value.leaveRequestId !== undefined ||
+        value.leaveFrom !== undefined ||
+        value.leaveTo !== undefined ||
+        value.fromDate !== undefined ||
+        value.toDate !== undefined ||
+        value.leaveDate !== undefined ||
+        value.leaveType !== undefined ||
+        value.universalLeaveStatus !== undefined ||
+        value.leaveStatus !== undefined
+    );
+}
+
+function collectLeaveRows(value, rows = [], depth = 0) {
+    if (depth > 8 || value === null || value === undefined) {
+        return rows;
+    }
+
+    if (Array.isArray(value)) {
+        value.forEach((item) => {
+            if (hasLeaveShape(item)) {
+                rows.push(item);
+            }
+            collectLeaveRows(item, rows, depth + 1);
+        });
+        return rows;
+    }
+
+    if (isPlainObject(value)) {
+        Object.values(value).forEach((item) => collectLeaveRows(item, rows, depth + 1));
+    }
+
+    return rows;
+}
+
+function unwrapArray(result) {
+    if (Array.isArray(result?.data?.leaveRequest)) {
+        return result.data.leaveRequest;
+    }
+
+    if (Array.isArray(result?.data?.data?.leaveRequest)) {
+        return result.data.data.leaveRequest;
+    }
+
+    if (Array.isArray(result?.leaveRequest)) {
+        return result.leaveRequest;
+    }
+
+    return collectLeaveRows(result);
+}
+
+function getLeaveStatus(leave = {}) {
+    const status = leave.universalLeaveStatus ?? leave.leaveStatus ?? leave.statusId ?? leave.status;
+
+    if (isPlainObject(status)) {
+        return status.name ?? status.label ?? status.value ?? status.code ?? status.id;
+    }
+
+    return status;
+}
+
+function isPendingLeave(leave = {}) {
+    const status = getLeaveStatus(leave);
+    const text = String(status).toLowerCase();
+    return Number(status) === 0 || text === "pending" || text.includes("pending");
+}
+
+function isApprovedLeave(leave = {}) {
+    const status = getLeaveStatus(leave);
+    const text = String(status).toLowerCase();
+    return Number(status) === 1 || text === "approved" || text.includes("approved");
+}
+
+function getLeaveStatusLabel(leave = {}) {
+    if (isPendingLeave(leave)) {
+        return "pending";
+    }
+
+    if (isApprovedLeave(leave)) {
+        return "approved";
+    }
+
+    return String(getLeaveStatus(leave) ?? "unknown");
+}
+
+function getLeaveFromDate(leave = {}) {
+    return normalizeDateOnly(
+        leave.leaveFrom ?? leave.fromDate ?? leave.from ?? leave.dateTime1 ?? leave.leaveDate?.fromDate ?? leave.leaveDate?.[0]
+    );
+}
+
+function getLeaveToDate(leave = {}) {
+    return normalizeDateOnly(
+        leave.leaveTo ?? leave.toDate ?? leave.to ?? leave.dateTime2 ?? leave.leaveDate?.toDate ?? leave.leaveDate?.[1]
+    );
+}
+
+function leaveMatchesDate(leave, date) {
+    const normalizedDate = normalizeDateOnly(date);
+    const fromDate = getLeaveFromDate(leave);
+    const toDate = getLeaveToDate(leave) || fromDate;
+
+    return fromDate <= normalizedDate && normalizedDate <= toDate;
+}
+
+function getLeaveId(leave = {}) {
+    return leave.id ?? leave._id ?? leave.leaveId ?? leave.leaveRequestId;
+}
+
+function hasDowntimeShape(value = {}) {
+    return isPlainObject(value) && (
+        value.id !== undefined ||
+        value._id !== undefined ||
+        value.downTimeId !== undefined ||
+        value.downtimeId !== undefined ||
+        value.date !== undefined ||
+        value.startTime !== undefined ||
+        value.endTime !== undefined ||
+        value.departmentId !== undefined ||
+        value.subject !== undefined ||
+        value.description !== undefined
+    );
+}
+
+function collectDowntimeRows(value, rows = [], depth = 0) {
+    if (depth > 8 || value === null || value === undefined) {
+        return rows;
+    }
+
+    if (Array.isArray(value)) {
+        value.forEach((item) => {
+            if (hasDowntimeShape(item)) {
+                rows.push(item);
+            }
+            collectDowntimeRows(item, rows, depth + 1);
+        });
+        return rows;
+    }
+
+    if (isPlainObject(value)) {
+        Object.values(value).forEach((item) => collectDowntimeRows(item, rows, depth + 1));
+    }
+
+    return rows;
+}
+
+function unwrapDowntimeArray(result) {
+    return result?.data?.downTime || result?.data?.downtime || result?.data?.downTimeRequest ||
+        result?.data?.rows || result?.downTime || result?.downtime || collectDowntimeRows(result);
+}
+
+function getDowntimeId(item = {}) {
+    return item.id ?? item._id ?? item.downTimeId ?? item.downtimeId;
+}
+
+function getDowntimeStatus(item = {}) {
+    const status = item.universalDownTimeStatus ?? item.downTimeStatus ?? item.downtimeStatus ?? item.statusId ?? item.status;
+
+    if (isPlainObject(status)) {
+        return status.name ?? status.label ?? status.value ?? status.code ?? status.id;
+    }
+
+    return status;
+}
+
+function isPendingDowntime(item = {}) {
+    const status = getDowntimeStatus(item);
+    const text = String(status).toLowerCase();
+    return status === undefined || Number(status) === 0 || text === "pending" || text.includes("pending");
+}
+
+function downtimeMatchesDate(item, date) {
+    const normalizedDate = normalizeDateOnly(date);
+    const itemDate = normalizeDateOnly(item.date ?? item.downTimeDate ?? item.downtimeDate ?? item.startTime ?? item.createdAt);
+    return itemDate === normalizedDate;
+}
+
 function assertNoPastLeaveDate(fromDate, toDate) {
+    fromDate = normalizeDateOnly(fromDate);
+    toDate = normalizeDateOnly(toDate);
+
     if (!isIsoDate(fromDate) || !isIsoDate(toDate)) {
         throw new Error("Leave/WFH dates must use YYYY-MM-DD format.");
     }
@@ -359,6 +594,52 @@ async function getLeaveRequests({ skip = 0, limit = 10, authContext } = {}) {
     return request(api, "get", `/employee/leaveRequest?skip=${skip}&limit=${limit}`);
 }
 
+async function deletePendingLeaveRequest({ date, id, leaveId, authContext } = {}) {
+    const api = createEmployeeApi(authContext);
+    const normalizedDate = normalizeDateOnly(date);
+    const requestedId = id || leaveId;
+
+    if (!isIsoDate(normalizedDate)) {
+        throw new Error("Leave date must use YYYY-MM-DD format.");
+    }
+
+    const leaves = unwrapArray(await getLeaveRequests({ skip: 0, limit: 100, authContext }));
+    console.log("[HRMS] deletePendingLeaveRequest checked leaves", leaves.map((item) => ({
+        id: getLeaveId(item),
+        from: getLeaveFromDate(item),
+        to: getLeaveToDate(item) || getLeaveFromDate(item),
+        status: getLeaveStatus(item),
+        pending: isPendingLeave(item)
+    })));
+
+    const leave = requestedId
+        ? leaves.find((item) => String(getLeaveId(item)) === String(requestedId))
+        : leaves.find((item) =>
+        getLeaveId(item) &&
+        isPendingLeave(item) &&
+        leaveMatchesDate(item, normalizedDate)
+    );
+
+    if (leave && !isPendingLeave(leave)) {
+        throw new Error(`Leave request for ${normalizedDate} is ${getLeaveStatusLabel(leave)}. Only pending leave can be deleted.`);
+    }
+
+    if (leave && !leaveMatchesDate(leave, normalizedDate)) {
+        throw new Error(`Leave id ${getLeaveId(leave)} does not match ${normalizedDate}.`);
+    }
+
+    if (!leave) {
+        const candidates = leaves
+            .filter(isPendingLeave)
+            .map((item) => `${getLeaveFromDate(item)} to ${getLeaveToDate(item) || getLeaveFromDate(item)} (${item.leaveType || "unknown"})`)
+            .slice(0, 5)
+            .join(", ");
+        throw new Error(`No pending leave request found for ${normalizedDate}. Pending candidates checked: ${candidates || "none"}.`);
+    }
+
+    return request(api, "patch", `/employee/deleteLeaveRequest/${getLeaveId(leave)}`, {});
+}
+
 async function getAllEmployeeLeaves({ authContext } = {}) {
     const api = createEmployeeApi(authContext);
     return request(api, "get", "/employee/allEmployee-leave");
@@ -455,14 +736,29 @@ async function submitDailyStatusReport({ tasks = [], authContext } = {}) {
 async function markDownTime({ date, departmentId, description, endTime, name, poId, startTime, subject, authContext } = {}) {
     const api = createEmployeeApi(authContext);
     const user = getUserClaims(authContext);
+    const userPoIds = toNumberArray(poId).length ? toNumberArray(poId) : getUserPoIds(user);
+    let resolvedPoId = userPoIds.length ? userPoIds : toNumberArray(process.env.PO_ID);
+    const resolvedName = name || user.name || user.userName || user.email;
+
+    if (!resolvedPoId.length) {
+        try {
+            resolvedPoId = extractPoIdsFromProjects(await getProjects({ skip: 0, limit: 100, authContext }));
+        } catch (error) {
+            console.warn("[HRMS] Could not derive poId from projects:", error.message);
+        }
+    }
+
+    if (!resolvedPoId.length) {
+        throw new Error("Cannot mark downtime: missing poId in request, session token, assigned projects, or PO_ID env.");
+    }
     
     const payload = {
         date,
         departmentId,
         description,
         endTime,
-        name,
-        poId,
+        name: resolvedName,
+        poId: resolvedPoId,
         startTime,
         subject
     };
@@ -475,6 +771,73 @@ async function markDownTime({ date, departmentId, description, endTime, name, po
     });
 
     return request(api, "post", "/employee/markDownTime", payload);
+}
+
+async function getDownTimeRequests({ skip = 0, limit = 100, authContext } = {}) {
+    const api = createEmployeeApi(authContext);
+    const paths = [
+        `/employee/markDownTime?skip=${skip}&limit=${limit}`,
+        `/employee/downTime?skip=${skip}&limit=${limit}`,
+        `/employee/downtime?skip=${skip}&limit=${limit}`,
+        `/employee/downTimeRequest?skip=${skip}&limit=${limit}`,
+        `/employee/getDownTime?skip=${skip}&limit=${limit}`
+    ];
+
+    let lastError = null;
+    for (const path of paths) {
+        try {
+            return await request(api, "get", path);
+        } catch (error) {
+            lastError = error;
+            const status = error.statusCode || error.response?.status;
+            if (status === 401 || status === 403) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError || new Error("No downtime lookup endpoint found.");
+}
+
+async function deletePendingDownTime({ date, id, downTimeId, downtimeId, authContext } = {}) {
+    const api = createEmployeeApi(authContext);
+    const normalizedDate = normalizeDateOnly(date);
+    const requestedId = id || downTimeId || downtimeId;
+
+    if (!isIsoDate(normalizedDate)) {
+        throw new Error("Downtime date must use YYYY-MM-DD format.");
+    }
+
+    const rows = unwrapDowntimeArray(await getDownTimeRequests({ skip: 0, limit: 100, authContext }));
+    console.log("[HRMS] deletePendingDownTime checked rows", rows.map((item) => ({
+        id: getDowntimeId(item),
+        date: normalizeDateOnly(item.date ?? item.downTimeDate ?? item.downtimeDate ?? item.startTime ?? item.createdAt),
+        status: getDowntimeStatus(item),
+        pending: isPendingDowntime(item)
+    })));
+
+    const item = requestedId
+        ? rows.find((row) => String(getDowntimeId(row)) === String(requestedId))
+        : rows.find((row) => getDowntimeId(row) && isPendingDowntime(row) && downtimeMatchesDate(row, normalizedDate));
+
+    if (item && !isPendingDowntime(item)) {
+        throw new Error(`Downtime request for ${normalizedDate} is not pending. Only pending downtime can be deleted.`);
+    }
+
+    if (item && !downtimeMatchesDate(item, normalizedDate)) {
+        throw new Error(`Downtime id ${getDowntimeId(item)} does not match ${normalizedDate}.`);
+    }
+
+    if (!item) {
+        const candidates = rows
+            .filter(isPendingDowntime)
+            .map((row) => `${getDowntimeId(row)}:${normalizeDateOnly(row.date ?? row.downTimeDate ?? row.downtimeDate ?? row.startTime ?? row.createdAt)}`)
+            .slice(0, 5)
+            .join(", ");
+        throw new Error(`No pending downtime found for ${normalizedDate}. Pending candidates checked: ${candidates || "none"}.`);
+    }
+
+    return request(api, "patch", `/employee/deleteDownTime/${getDowntimeId(item)}`, {});
 }
 
 async function createTicket({ assigned_to, description, priority, title, authContext } = {}) {
@@ -520,12 +883,26 @@ async function applyLeave({
 }) {
     const api = createEmployeeApi(authContext);
     const user = getUserClaims(authContext);
+    fromDate = normalizeDateOnly(fromDate);
+    toDate = normalizeDateOnly(toDate);
     assertNoPastLeaveDate(fromDate, toDate);
     const fromDateTime = toLeaveDateTime(fromDate, "00:00:00");
     const toDateTime = toLeaveDateTime(toDate, "23:59:59");
 
     if (!user.empId || !user.userId) {
         throw new Error("Login session is missing empId or userId.");
+    }
+
+    const leaves = unwrapArray(await getLeaveRequests({ skip: 0, limit: 100, authContext }));
+    const existingLeave = leaves.find((item) =>
+        leaveMatchesDate(item, fromDate) &&
+        (isPendingLeave(item) || isApprovedLeave(item))
+    );
+
+    if (existingLeave) {
+        throw new Error(
+            `Cannot apply leave/WFH for ${fromDate}. Existing request status is ${getLeaveStatusLabel(existingLeave)}.`
+        );
     }
 
     const contactNum = getUserContactNumber(user) || process.env.CONTACT_NUM;
@@ -616,6 +993,7 @@ module.exports = {
     getLeaveContext,
     getLeaveTypes,
     getLeaveRequests,
+    deletePendingLeaveRequest,
     getAllEmployeeLeaves,
     getHolidays,
     getCurrentYearHolidays,
@@ -627,6 +1005,8 @@ module.exports = {
     getActiveTickets,
     submitDailyStatusReport,
     markDownTime,
+    getDownTimeRequests,
+    deletePendingDownTime,
     createTicket,
     applyLeave
 };

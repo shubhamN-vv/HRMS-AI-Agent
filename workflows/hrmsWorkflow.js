@@ -3,7 +3,7 @@ const { createHrmsTools } = require("../tools/hrmsTools");
 const { HRMS_AGENT_SYSTEM_PROMPT } = require("../prompts/systemPrompt");
 
 const openAiTools = [
-    createToolSchema("get_employee_leave_context", "Get live HRMS leave context, including supported leave types and recent leave or WFH requests."),
+    createToolSchema("get_employee_leave_context", "Get live HRMS leave context, including supported leave types and recent leave or WFH requests with status."),
     createToolSchema("get_employee_attendance", "Get employee attendance records for a year.", {
         year: {
             type: "integer",
@@ -90,12 +90,12 @@ const openAiTools = [
         },
         name: {
             type: "string",
-            description: "Employee name"
+            description: "Employee name. Defaults to session user name."
         },
         poId: {
             type: "array",
             items: { type: "integer" },
-            description: "Project owner IDs (e.g., [249])"
+            description: "Project owner IDs. Defaults to session token poId or PO_ID env."
         },
         startTime: {
             type: "string",
@@ -105,7 +105,7 @@ const openAiTools = [
             type: "string",
             description: "Downtime subject/title"
         }
-    }, ["date", "departmentId", "description", "endTime", "name", "poId", "startTime", "subject"]),
+    }, ["date", "departmentId", "description", "endTime", "startTime", "subject"]),
     createToolSchema("create_support_ticket", "Create a support ticket for issues or requests. Requires title, description, priority level, and the user ID to assign it to.", {
         assigned_to: {
             type: "integer",
@@ -126,6 +126,53 @@ const openAiTools = [
         }
     }, ["assigned_to", "description", "priority", "title"]),
     createToolSchema("get_department_dropdown", "Get the list of available departments for downtime submission (hr, it, training, sales & marketting, technology, qa)."),
+    createToolSchema("get_down_time_requests", "Get existing downtime requests for matching pending downtime by date before deletion.", {
+        skip: { type: "integer" },
+        limit: { type: "integer" }
+    }),
+    createToolSchema("delete_pending_down_time", "Delete an existing pending downtime request after date/status match.", {
+        date: {
+            type: "string",
+            description: "Downtime date to delete in YYYY-MM-DD format"
+        },
+        id: {
+            type: "integer",
+            description: "Optional HRMS downtime id"
+        },
+        downTimeId: {
+            type: "integer",
+            description: "Optional HRMS downtime id"
+        },
+        downtimeId: {
+            type: "integer",
+            description: "Optional HRMS downtime id"
+        }
+    }, ["date"]),
+    createToolSchema("delete_pending_leave_request", "Delete an existing pending leave request after exact date/status match. Approved/rejected leave cannot be deleted.", {
+        date: {
+            type: "string",
+            description: "Leave date to delete in YYYY-MM-DD format"
+        },
+        id: {
+            type: "integer",
+            description: "Optional HRMS leave request id"
+        },
+        leaveId: {
+            type: "integer",
+            description: "Optional HRMS leave request id"
+        },
+        leaveType: {
+            type: "string",
+            enum: [
+                "earned_leave",
+                "paternity_leave",
+                "maternity_leave",
+                "compensatory_off",
+                "sick_and_casual_leave",
+                "work_from_home"
+            ]
+        }
+    }, ["date"]),
     createToolSchema("apply_employee_leave", "Apply employee leave or WFH using HRMS. Only use this after the user explicitly confirms the preview.", {
         fromDate: {
             type: "string",
