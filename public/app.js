@@ -707,8 +707,12 @@ async function logout() {
         });
     }
 
-    // Redirect the user immediately back to Microsoft SSO after logout.
-    await msalInstance.loginRedirect(loginRequest);
+    // Actually clear the Microsoft SSO session too, not just local MSAL cache
+    const activeAccount = msalInstance.getActiveAccount();
+    await msalInstance.logoutRedirect({
+        account: activeAccount,
+        postLogoutRedirectUri: window.location.origin,
+    });
 }
 
 function restoreSession() {
