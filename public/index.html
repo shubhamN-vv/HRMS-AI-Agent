@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <main>
+        <section id="loadingSection">
+            <div class="login-container">
+                <p id="loginStatus" class="meta">Loading...</p>
+            </div>
+        </section>
+
+        <section id="loginSection" class="hidden">
+            <div class="login-container">
+                <div class="login-header">
+                    <h1>HRMS AI Agent</h1>
+                    <p>Sign in with your Microsoft account</p>
+                </div>
+                <button id="microsoftLoginButton" class="ms-login">
+                    <svg class="ms-logo" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="1" y="1" width="9" height="9" fill="white" />
+                        <rect x="13" y="1" width="9" height="9" fill="white" />
+                        <rect x="1" y="13" width="9" height="9" fill="white" />
+                        <rect x="13" y="13" width="9" height="9" fill="white" />
+                    </svg>
+                    Continue with Microsoft
+                </button>
+                <p class="meta"></p>
+            </div>
+        </section>
+
+        <section id="chatSection" class="hidden">
+            <div class="chatHeader">
+                <h2>Chat | HRMS AI Agent</h2>
+                <button id="logoutButton" class="secondary compact" style="font-size: small;">Logout</button>
+            </div>
+            <p id="userInfo" class="meta"></p>
+            <div class="messages-wrapper">
+                <div id="messages" class="messages"></div>
+                <div id="busyIndicator" class="busy hidden" aria-label="Agent is typing">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                </div>
+            </div>
+            <label for="message">Message</label>
+            <div id="shortcutChips" class="shortcut-chips" aria-label="Quick HRMS actions"></div>
+            <div class="inputWrapper">
+                <div id="message" contenteditable="true" role="textbox" aria-multiline="true" data-empty="true"
+                    data-placeholder="" spellcheck="true"></div>
+                <button id="stopButton" class="stop-icon hidden" type="button" aria-label="Stop">
+                    &#x23F9;
+                </button>
+                <div id="slashMenu" class="slash-menu hidden"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
