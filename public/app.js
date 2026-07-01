@@ -707,11 +707,14 @@ async function logout() {
         });
     }
 
-    // Actually clear the Microsoft SSO session too, not just local MSAL cache
-    const activeAccount = msalInstance.getActiveAccount();
-    await msalInstance.logoutRedirect({
-        account: activeAccount,
-        postLogoutRedirectUri: window.location.origin,
+    // Clear only this app's local MSAL cache — not Microsoft's global session
+    sessionStorage.clear();
+
+    // Force account picker / login screen instead of silent SSO re-login,
+    // without logging the user out of other Microsoft apps/sessions
+    await msalInstance.loginRedirect({
+        ...loginRequest,
+        prompt: "select_account",
     });
 }
 
