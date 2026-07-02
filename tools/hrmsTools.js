@@ -81,7 +81,7 @@ function createHrmsTools(authContext = {}) {
         createDownTimeRequestsTool(authContext),
         createDeleteDownTimeTool(authContext),
         createTicketTool(authContext),
-        createDepartmentDropdownTool(authContext),
+        createDepartmentDropdownTool(),
         createDeleteLeaveTool(authContext),
         createApplyLeaveTool(authContext)
     ];
@@ -345,7 +345,7 @@ const departmentDropdown = [
     { id: 131, name: "hr" },
     { id: 132, name: "it" },
     { id: 133, name: "training" },
-    { id: 134, name: "sales & marketting" },
+    { id: 134, name: "sales & marketing" },
     { id: 135, name: "technology" },
     { id: 136, name: "qa" }
 ];

@@ -14,6 +14,7 @@ function getApiRoot() {
     try {
         return new URL(baseUrl).origin;
     } catch (error) {
+        console.warn(`Invalid HRMS_API_BASE_URL "${baseUrl}": ${error.message}`);
         return DEFAULT_API_ROOT;
     }
 }
@@ -46,10 +47,9 @@ function decodeJwt(token) {
         const payload = token.split(".")[1];
         const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
         const decoded = Buffer.from(normalized, "base64").toString("utf8");
-
         return JSON.parse(decoded);
     } catch (error) {
-        return {};
+        throw new Error("Failed to decode JWT token: " + error.message);
     }
 }
 

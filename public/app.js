@@ -3,7 +3,7 @@ const msalConfig = {
     auth: {
         clientId: "f876110d-32fd-4f66-b5d7-1f7860f09445",
         authority: "https://login.microsoftonline.com/814e9d1d-9941-4486-84f3-d0dd72dca76b",
-        redirectUri: window.location.origin,
+        redirectUri: globalThis.location.origin,
         postLogoutRedirectUri: "/"
     },
     cache: {
@@ -387,7 +387,7 @@ function inputSetDisabled(disabled) {
 
 // Get text before the caret inside messageInput
 function getTextBeforeCaret() {
-    const sel = window.getSelection();
+    const sel = globalThis.getSelection();
     if (!sel || sel.rangeCount === 0) return "";
     const range = sel.getRangeAt(0).cloneRange();
     range.selectNodeContents(messageInput);
@@ -450,7 +450,7 @@ function createShortcutToken(shortcut) {
 }
 
 function placeCaretAfter(node) {
-    const sel = window.getSelection();
+    const sel = globalThis.getSelection();
     if (!sel) return;
     const range = document.createRange();
     range.setStartAfter(node);
@@ -460,7 +460,7 @@ function placeCaretAfter(node) {
 }
 
 function placeCaretAtStart() {
-    const sel = window.getSelection();
+    const sel = globalThis.getSelection();
     if (!sel) return;
     const range = document.createRange();
     range.setStart(messageInput, 0);
@@ -478,23 +478,68 @@ function normalizeEmptyInput() {
 }
 
 // Replace the last N characters before the caret with a .tok span + trailing space text node
-function insertToken(moduleName, deleteLen) {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+function deleteCharsBeforeCaret(deleteLen) {
+    const sel = globalThis.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
 
-    // Delete the typed chars
-    const range = sel.getRangeAt(0).cloneRange();
-    range.setStart(range.startContainer, range.startOffset - deleteLen);
-    range.deleteContents();
+    const caretRange = sel.getRangeAt(0);
+    const caretNode = caretRange.startContainer;
+    const caretOffset = caretRange.startOffset;
+
+    if (caretNode.nodeType !== Node.TEXT_NODE) {
+        return null;
+    }
+
+    // Collect all text nodes inside messageInput, in order
+    const walker = document.createTreeWalker(messageInput, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        textNodes.push(node);
+    }
+
+    let idx = textNodes.indexOf(caretNode);
+    if (idx === -1) return null;
+
+    let remaining = deleteLen;
+    let startNode = caretNode;
+    let startOffset = caretOffset;
+
+    while (remaining > 0) {
+        if (startOffset >= remaining) {
+            startOffset -= remaining;
+            remaining = 0;
+        } else {
+            remaining -= startOffset;
+            idx -= 1;
+            if (idx < 0) {
+                // Ran out of text before caret — clamp safely instead of crashing
+                startNode = textNodes[0] || caretNode;
+                startOffset = 0;
+                break;
+            }
+            startNode = textNodes[idx];
+            startOffset = startNode.length;
+        }
+    }
+
+    const deleteRange = document.createRange();
+    deleteRange.setStart(startNode, startOffset);
+    deleteRange.setEnd(caretNode, caretOffset);
+    return deleteRange;
+}
+
+function insertToken(moduleName, deleteLen) {
+    const deleteRange = deleteCharsBeforeCaret(deleteLen);
+    if (!deleteRange) return;
+
+    deleteRange.deleteContents();
 
     const span = createToken(moduleName);
-
-    // Insert a plain space after it so cursor lands in normal text
     const space = document.createTextNode(" ");
 
-    const insertRange = sel.getRangeAt(0);
-    insertRange.insertNode(space);
-    insertRange.insertNode(span);
+    deleteRange.insertNode(space);
+    deleteRange.insertNode(span);
 
     placeCaretAfter(space);
 
@@ -641,14 +686,20 @@ function handleMessageInput() {
 }
 
 // Auto-convert bare module word typed + space → /module token
+// Also handles "/module " typed manually and confirmed with space (not Enter/click)
 function checkBareModuleWord() {
     const textBefore = getTextBeforeCaret();
-    const match = /(?:^|\s)([a-z][a-z0-9-]*)\s$/i.exec(textBefore);
+    const match = /(?:^|\s)(\/)?([a-z][a-z0-9-]*)\s$/i.exec(textBefore);
     if (!match) return;
-    const word = match[1].toLowerCase();
+
+    const hasSlash = Boolean(match[1]);
+    const word = match[2].toLowerCase();
     if (!slashModules.includes(word)) return;
-    // deleteLen = word + the space = match[1].length + 1
-    insertToken(word, match[1].length + 1);
+
+    // deleteLen = optional "/" + word + trailing space
+    const deleteLen = word.length + 1 + (hasSlash ? 1 : 0);
+    insertToken(word, deleteLen);
+    closeSlashMenu();
 }
 
 function setBusy(isBusy) {
@@ -808,7 +859,7 @@ messageInput.addEventListener("keydown", (event) => {
     }
     if (event.key === "Escape") {
         closeSlashMenu();
-        return;
+        globalThis.getSelection().removeAllRanges();
     }
 });
 logoutButton.addEventListener("click", logout);
